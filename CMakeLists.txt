@@ -9,6 +9,24 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui calib3d videoio imgcodecs)
 find_package(Threads REQUIRED)
 
+option(NXVISION_WITH_ORBBEC "Build native Orbbec SDK camera backend" ON)
+set(ORBBECSDK_ROOT "" CACHE PATH "Path to an Orbbec SDK v2 install or extracted package")
+if(NXVISION_WITH_ORBBEC)
+    if(ORBBECSDK_ROOT)
+        list(PREPEND CMAKE_PREFIX_PATH "${ORBBECSDK_ROOT}" "${ORBBECSDK_ROOT}/lib")
+    elseif(DEFINED ENV{ORBBECSDK_ROOT})
+        list(PREPEND CMAKE_PREFIX_PATH "$ENV{ORBBECSDK_ROOT}" "$ENV{ORBBECSDK_ROOT}/lib")
+    endif()
+
+    find_package(OrbbecSDK CONFIG QUIET)
+    if(OrbbecSDK_FOUND)
+        message(STATUS "Orbbec SDK found; native camera backend enabled")
+    else()
+        message(WARNING "Orbbec SDK not found; native camera backend disabled")
+        set(NXVISION_WITH_ORBBEC OFF)
+    endif()
+endif()
+
 add_library(nx_vision_core
     src/camera/orbbec_camera.cpp
     src/comm/gimbal_protocol.cpp
@@ -37,6 +55,10 @@ add_library(nx_vision_core
 
 target_include_directories(nx_vision_core PUBLIC include)
 target_link_libraries(nx_vision_core PUBLIC ${OpenCV_LIBS} Threads::Threads)
+if(NXVISION_WITH_ORBBEC)
+    target_compile_definitions(nx_vision_core PUBLIC NXVISION_WITH_ORBBEC=1)
+    target_link_libraries(nx_vision_core PUBLIC ob::OrbbecSDK)
+endif()
 
 function(add_nx_app target source)
     add_executable(${target} ${source})
@@ -48,6 +70,7 @@ add_nx_app(nx_debug_studio apps/debug_studio/main.cpp)
 add_nx_app(nx_replay_viewer apps/replay_viewer/main.cpp)
 add_nx_app(nx_calibration apps/calibration_studio/main.cpp)
 add_nx_app(nx_task_runner apps/task_runner/main.cpp)
+add_nx_app(nx_camera_smoke apps/camera_smoke/main.cpp)
 
 option(NXVISION_BUILD_TESTS "Build lightweight unit tests" ON)
 if(NXVISION_BUILD_TESTS)

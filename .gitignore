@@ -29,3 +29,4 @@ debug_view/snapshots/*.png
 debug_view/videos/
 data/calibration_images/*.png
 data/recorded_runs/
+Log/
