@@ -122,6 +122,17 @@ void load_debug(const std::string &dir, DebugViewConfig *config)
     read_value(fs, "snapshot_dir", &config->snapshot_dir);
 }
 
+void load_depth(const std::string &dir, DepthConfig *config)
+{
+    cv::FileStorage fs(path_join(dir, "depth.yaml"), cv::FileStorage::READ);
+    read_value(fs, "enabled", &config->enabled);
+    read_value(fs, "min_depth_mm", &config->min_depth_mm);
+    read_value(fs, "max_depth_mm", &config->max_depth_mm);
+    read_value(fs, "roi_shrink_ratio", &config->roi_shrink_ratio);
+    read_value(fs, "min_valid_samples", &config->min_valid_samples);
+    read_value(fs, "fallback_to_pnp", &config->fallback_to_pnp);
+}
+
 }  // namespace
 
 std::vector<cv::Point3f> TargetGeometry::outer_object_points() const
@@ -151,8 +162,8 @@ RuntimeConfig load_config(const std::string &config_dir)
     load_laser(config_dir, &config.laser);
     load_serial(config_dir, &config.serial);
     load_debug(config_dir, &config.debug);
+    load_depth(config_dir, &config.depth);
     return config;
 }
 
 }  // namespace nxv
-

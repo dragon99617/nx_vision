@@ -46,8 +46,18 @@ cv::Mat OverlayDrawer::draw_main_overlay(const cv::Mat &color_bgr, const Pipelin
         put_label(overlay, format_double("Yaw", result.aim.yaw_delta_deg, " deg"), 24, cv::Scalar(0, 255, 0));
         put_label(overlay, format_double("Pitch", result.aim.pitch_delta_deg, " deg"), 48, cv::Scalar(0, 255, 0));
         put_label(overlay, format_double("Distance", result.aim.distance_mm, " mm"), 72, cv::Scalar(0, 255, 0));
+        if (result.depth.used_for_aim) {
+            put_label(overlay, "Distance source: depth", 96, cv::Scalar(0, 255, 0));
+        } else if (result.depth.fallback_used) {
+            put_label(overlay, "Distance source: pnp fallback", 96, cv::Scalar(0, 255, 255));
+        } else {
+            put_label(overlay, "Distance source: pnp", 96, cv::Scalar(0, 255, 255));
+        }
     } else {
         put_label(overlay, "NO VALID TARGET", 24, cv::Scalar(0, 0, 255));
+        if (!result.depth.failure_reason.empty()) {
+            put_label(overlay, "Depth: " + result.depth.failure_reason, 48, cv::Scalar(0, 0, 255));
+        }
     }
     put_label(overlay, "Serial: " + result.serial_packet, overlay.rows - 18, cv::Scalar(255, 255, 0));
     return overlay;

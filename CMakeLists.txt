@@ -38,6 +38,7 @@ add_library(nx_vision_core
     src/debug_view/visual_debugger.cpp
     src/pipeline/aim_pipeline.cpp
     src/pose/angle_projector.cpp
+    src/pose/depth_estimator.cpp
     src/pose/laser_compensator.cpp
     src/pose/pnp_solver.cpp
     src/tasks/adv_circle_sync.cpp
@@ -78,4 +79,8 @@ if(NXVISION_BUILD_TESTS)
     add_executable(test_gimbal_protocol tests/test_gimbal_protocol.cpp)
     target_link_libraries(test_gimbal_protocol PRIVATE nx_vision_core)
     add_test(NAME test_gimbal_protocol COMMAND test_gimbal_protocol)
+
+    add_executable(test_depth_estimator tests/test_depth_estimator.cpp)
+    target_link_libraries(test_depth_estimator PRIVATE nx_vision_core)
+    add_test(NAME test_depth_estimator COMMAND test_depth_estimator)
 endif()

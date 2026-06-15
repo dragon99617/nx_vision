@@ -5,6 +5,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include <filesystem>
+#include <iostream>
 #include <map>
 #include <utility>
 
@@ -17,6 +18,10 @@ VisualDebugger::VisualDebugger(DebugViewConfig config)
 
 int VisualDebugger::show(const PipelineResult &result, const CameraIntrinsics &intrinsics)
 {
+    if (!config_.show_windows) {
+        return -1;
+    }
+
     std::map<std::string, cv::Mat> panels = result.panels;
     panels["main"] = overlay_.draw_main_overlay(result.panels.count("raw") ? result.panels.at("raw") : cv::Mat(), result);
     panels["pose"] = overlay_.draw_pose_overlay(result.panels.count("raw") ? result.panels.at("raw") : cv::Mat(), result, intrinsics);
@@ -26,8 +31,18 @@ int VisualDebugger::show(const PipelineResult &result, const CameraIntrinsics &i
     panels["serial"] = serial_panel;
 
     const cv::Mat overview = layout_.make_overview(panels, config_.panel_width, config_.panel_height);
-    cv::imshow("nx_debug_studio", overview);
-    return cv::waitKey(1);
+    try {
+        cv::imshow("nx_debug_studio", overview);
+        return cv::waitKey(1);
+    } catch (const cv::Exception &error) {
+        config_.show_windows = false;
+        if (!window_error_reported_) {
+            std::cerr << "[debug] OpenCV window backend unavailable; disabling debug windows: "
+                      << error.what() << "\n";
+            window_error_reported_ = true;
+        }
+        return -1;
+    }
 }
 
 bool VisualDebugger::save_snapshot(const PipelineResult &result, const CameraIntrinsics &intrinsics) const

@@ -9,6 +9,7 @@
 
 #ifdef NXVISION_WITH_ORBBEC
 namespace ob {
+class Align;
 class Pipeline;
 }
 #endif
@@ -32,9 +33,11 @@ private:
     cv::Mat static_image_;
 #ifdef NXVISION_WITH_ORBBEC
     std::shared_ptr<ob::Pipeline> orbbec_pipeline_;
+    std::shared_ptr<ob::Align> depth_to_color_align_;
 #endif
     bool static_mode_ = false;
     bool orbbec_mode_ = false;
+    bool software_depth_align_ = false;
     bool opened_ = false;
 };
 

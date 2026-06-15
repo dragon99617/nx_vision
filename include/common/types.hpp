@@ -65,6 +65,16 @@ struct PoseResult {
     double distance_mm = 0.0;
 };
 
+struct DepthEstimate {
+    bool valid = false;
+    bool used_for_aim = false;
+    bool fallback_used = false;
+    cv::Point3d target_cam_mm = cv::Point3d(0.0, 0.0, 0.0);
+    double depth_mm = 0.0;
+    int valid_sample_count = 0;
+    std::string failure_reason;
+};
+
 struct AimResult {
     bool valid = false;
     double yaw_delta_deg = 0.0;
@@ -79,10 +89,10 @@ struct PipelineResult {
     PreprocessOutput preprocess;
     RectangleDetection rectangle;
     PoseResult pose;
+    DepthEstimate depth;
     AimResult aim;
     std::string serial_packet;
     std::map<std::string, cv::Mat> panels;
 };
 
 }  // namespace nxv
-

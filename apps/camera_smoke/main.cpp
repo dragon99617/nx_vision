@@ -20,7 +20,13 @@ int main(int argc, char **argv)
         nxv::FrameBundle frame;
         if (camera.grab(&frame) && !frame.color_bgr.empty()) {
             std::cout << "camera ok: " << frame.color_bgr.cols << "x" << frame.color_bgr.rows
-                      << " timestamp_s=" << frame.timestamp_s << "\n";
+                      << " timestamp_s=" << frame.timestamp_s;
+            if (!frame.depth_mm.empty()) {
+                std::cout << " depth=" << frame.depth_mm.cols << "x" << frame.depth_mm.rows;
+            } else {
+                std::cout << " depth=unavailable";
+            }
+            std::cout << "\n";
             return 0;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

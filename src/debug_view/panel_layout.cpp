@@ -34,7 +34,7 @@ cv::Mat PanelLayout::make_overview(const std::map<std::string, cv::Mat> &panels,
     const std::vector<std::string> order = {
         "main", "binary", "edges",
         "combined", "contours", "perspective",
-        "pose", "serial",
+        "pose", "depth", "serial",
     };
 
     const int cols = 3;
@@ -55,4 +55,3 @@ cv::Mat PanelLayout::make_overview(const std::map<std::string, cv::Mat> &panels,
 }
 
 }  // namespace nxv
-

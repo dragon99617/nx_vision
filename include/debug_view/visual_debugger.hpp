@@ -17,7 +17,7 @@ private:
     DebugViewConfig config_;
     OverlayDrawer overlay_;
     PanelLayout layout_;
+    bool window_error_reported_ = false;
 };
 
 }  // namespace nxv
-

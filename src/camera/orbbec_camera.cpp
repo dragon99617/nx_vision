@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cctype>
 #include <iostream>
+#include <memory>
 
 namespace nxv {
 namespace {
@@ -34,6 +35,102 @@ void log_orbbec_error(const char *context, const ob::Error &error)
     std::cerr << context << ": " << error.what() << " [function=" << error.getFunction()
               << ", args=" << error.getArgs() << ", status=" << error.getStatus()
               << ", type=" << error.getExceptionType() << "]\n";
+}
+
+bool video_profile_matches(const std::shared_ptr<ob::StreamProfile> &profile, const AppConfig &config)
+{
+    const auto video = profile->as<ob::VideoStreamProfile>();
+    if (config.capture_width > 0 && static_cast<int>(video->getWidth()) != config.capture_width) {
+        return false;
+    }
+    if (config.capture_height > 0 && static_cast<int>(video->getHeight()) != config.capture_height) {
+        return false;
+    }
+    if (config.capture_fps > 0 && static_cast<int>(video->getFps()) != config.capture_fps) {
+        return false;
+    }
+    return true;
+}
+
+bool depth_profile_supported_for_d2c(const std::shared_ptr<ob::Pipeline> &pipeline,
+                                     const std::shared_ptr<ob::StreamProfile> &color_profile,
+                                     const std::shared_ptr<ob::StreamProfile> &depth_profile)
+{
+    auto supported = pipeline->getD2CDepthProfileList(color_profile, ALIGN_D2C_HW_MODE);
+    const auto depth_video = depth_profile->as<ob::VideoStreamProfile>();
+    for (uint32_t i = 0; i < supported->getCount(); ++i) {
+        auto candidate = supported->getProfile(i)->as<ob::VideoStreamProfile>();
+        if (candidate->getWidth() == depth_video->getWidth() &&
+            candidate->getHeight() == depth_video->getHeight() &&
+            candidate->getFps() == depth_video->getFps() &&
+            candidate->getFormat() == depth_video->getFormat()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::shared_ptr<ob::Config> make_hw_d2c_config(const std::shared_ptr<ob::Pipeline> &pipeline,
+                                               const AppConfig &app_config)
+{
+    auto color_profiles = pipeline->getStreamProfileList(OB_SENSOR_COLOR);
+    auto depth_profiles = pipeline->getStreamProfileList(OB_SENSOR_DEPTH);
+
+    for (uint32_t i = 0; i < color_profiles->getCount(); ++i) {
+        auto color_profile = color_profiles->getProfile(i);
+        if (!video_profile_matches(color_profile, app_config)) {
+            continue;
+        }
+        const auto color_video = color_profile->as<ob::VideoStreamProfile>();
+        for (uint32_t j = 0; j < depth_profiles->getCount(); ++j) {
+            auto depth_profile = depth_profiles->getProfile(j);
+            const auto depth_video = depth_profile->as<ob::VideoStreamProfile>();
+            if (color_video->getFps() != depth_video->getFps()) {
+                continue;
+            }
+            if (!depth_profile_supported_for_d2c(pipeline, color_profile, depth_profile)) {
+                continue;
+            }
+
+            auto stream_config = std::make_shared<ob::Config>();
+            stream_config->enableStream(color_profile);
+            stream_config->enableStream(depth_profile);
+            stream_config->setAlignMode(ALIGN_D2C_HW_MODE);
+            stream_config->setFrameAggregateOutputMode(OB_FRAME_AGGREGATE_OUTPUT_ALL_TYPE_FRAME_REQUIRE);
+            return stream_config;
+        }
+    }
+    return nullptr;
+}
+
+std::shared_ptr<ob::Config> make_rgbd_config(const AppConfig &app_config, bool use_requested_profile)
+{
+    auto stream_config = std::make_shared<ob::Config>();
+    if (use_requested_profile) {
+        const uint32_t width = app_config.capture_width > 0 ? static_cast<uint32_t>(app_config.capture_width) : OB_WIDTH_ANY;
+        const uint32_t height = app_config.capture_height > 0 ? static_cast<uint32_t>(app_config.capture_height) : OB_HEIGHT_ANY;
+        const uint32_t fps = app_config.capture_fps > 0 ? static_cast<uint32_t>(app_config.capture_fps) : OB_FPS_ANY;
+        stream_config->enableVideoStream(OB_STREAM_COLOR, width, height, fps, OB_FORMAT_ANY);
+    } else {
+        stream_config->enableVideoStream(OB_STREAM_COLOR);
+    }
+    stream_config->enableVideoStream(OB_STREAM_DEPTH, OB_WIDTH_ANY, OB_HEIGHT_ANY, OB_FPS_ANY, OB_FORMAT_Y16);
+    stream_config->setFrameAggregateOutputMode(OB_FRAME_AGGREGATE_OUTPUT_ALL_TYPE_FRAME_REQUIRE);
+    return stream_config;
+}
+
+std::shared_ptr<ob::Config> make_color_config(const AppConfig &app_config, bool use_requested_profile)
+{
+    auto stream_config = std::make_shared<ob::Config>();
+    if (use_requested_profile) {
+        const uint32_t width = app_config.capture_width > 0 ? static_cast<uint32_t>(app_config.capture_width) : OB_WIDTH_ANY;
+        const uint32_t height = app_config.capture_height > 0 ? static_cast<uint32_t>(app_config.capture_height) : OB_HEIGHT_ANY;
+        const uint32_t fps = app_config.capture_fps > 0 ? static_cast<uint32_t>(app_config.capture_fps) : OB_FPS_ANY;
+        stream_config->enableVideoStream(OB_STREAM_COLOR, width, height, fps, OB_FORMAT_ANY);
+    } else {
+        stream_config->enableVideoStream(OB_STREAM_COLOR);
+    }
+    return stream_config;
 }
 
 cv::Mat color_frame_to_bgr(const std::shared_ptr<ob::Frame> &color_frame)
@@ -101,6 +198,27 @@ cv::Mat color_frame_to_bgr(const std::shared_ptr<ob::Frame> &color_frame)
         return {};
     }
 }
+
+cv::Mat depth_frame_to_mm(const std::shared_ptr<ob::Frame> &depth_frame)
+{
+    if (!depth_frame) {
+        return {};
+    }
+    const auto video_frame = depth_frame->as<ob::VideoFrame>();
+    const int width = static_cast<int>(video_frame->getWidth());
+    const int height = static_cast<int>(video_frame->getHeight());
+
+    if (depth_frame->getFormat() != OB_FORMAT_Y16) {
+        std::cerr << "Unsupported Orbbec depth format: " << static_cast<int>(depth_frame->getFormat()) << "\n";
+        return {};
+    }
+
+    const auto depth = depth_frame->as<ob::DepthFrame>();
+    const cv::Mat raw(height, width, CV_16UC1, depth_frame->getData());
+    cv::Mat depth_mm;
+    raw.convertTo(depth_mm, CV_32FC1, depth->getValueScale());
+    return depth_mm;
+}
 #endif
 
 }  // namespace
@@ -141,35 +259,71 @@ bool OrbbecCamera::open_opencv_camera(const AppConfig &config)
 bool OrbbecCamera::open_orbbec_camera(const AppConfig &config)
 {
 #ifdef NXVISION_WITH_ORBBEC
-    auto start_pipeline = [this](const AppConfig &app_config, bool use_requested_profile) {
+    try {
         auto pipeline = std::make_shared<ob::Pipeline>();
-        auto stream_config = std::make_shared<ob::Config>();
-        if (use_requested_profile) {
-            const uint32_t width = app_config.capture_width > 0 ? static_cast<uint32_t>(app_config.capture_width) : OB_WIDTH_ANY;
-            const uint32_t height = app_config.capture_height > 0 ? static_cast<uint32_t>(app_config.capture_height) : OB_HEIGHT_ANY;
-            const uint32_t fps = app_config.capture_fps > 0 ? static_cast<uint32_t>(app_config.capture_fps) : OB_FPS_ANY;
-            stream_config->enableVideoStream(
-                OB_STREAM_COLOR,
-                width,
-                height,
-                fps,
-                OB_FORMAT_ANY);
-        } else {
-            stream_config->enableVideoStream(OB_STREAM_COLOR);
+        try {
+            pipeline->enableFrameSync();
+        } catch (const ob::Error &error) {
+            log_orbbec_error("Orbbec frame sync unavailable; continuing without sync", error);
         }
-        pipeline->start(stream_config);
-        orbbec_pipeline_ = std::move(pipeline);
-    };
+
+        auto stream_config = make_hw_d2c_config(pipeline, config);
+        if (stream_config) {
+            pipeline->start(stream_config);
+            orbbec_pipeline_ = std::move(pipeline);
+            software_depth_align_ = false;
+            orbbec_mode_ = true;
+            opened_ = true;
+            std::cout << "Orbbec RGBD enabled with hardware depth-to-color alignment\n";
+            return true;
+        }
+    } catch (const ob::Error &error) {
+        log_orbbec_error("Hardware depth-to-color alignment failed", error);
+    } catch (const std::exception &error) {
+        std::cerr << "Hardware depth-to-color alignment failed: " << error.what() << "\n";
+    }
 
     try {
+        auto pipeline = std::make_shared<ob::Pipeline>();
         try {
-            start_pipeline(config, true);
+            pipeline->enableFrameSync();
         } catch (const ob::Error &error) {
-            log_orbbec_error("Requested Orbbec color profile failed, falling back to SDK default", error);
-            start_pipeline(config, false);
+            log_orbbec_error("Orbbec frame sync unavailable; continuing without sync", error);
         }
+
+        try {
+            pipeline->start(make_rgbd_config(config, true));
+        } catch (const ob::Error &error) {
+            log_orbbec_error("Requested Orbbec RGBD profile failed, falling back to SDK default RGBD", error);
+            pipeline->start(make_rgbd_config(config, false));
+        }
+        orbbec_pipeline_ = std::move(pipeline);
+        depth_to_color_align_ = std::make_shared<ob::Align>(OB_STREAM_COLOR);
+        software_depth_align_ = true;
         orbbec_mode_ = true;
         opened_ = true;
+        std::cout << "Orbbec RGBD enabled with software depth-to-color alignment\n";
+        return true;
+    } catch (const ob::Error &error) {
+        log_orbbec_error("Failed to open Orbbec RGBD streams", error);
+    } catch (const std::exception &error) {
+        std::cerr << "Failed to open Orbbec RGBD streams: " << error.what() << "\n";
+    }
+
+    try {
+        auto pipeline = std::make_shared<ob::Pipeline>();
+        try {
+            pipeline->start(make_color_config(config, true));
+        } catch (const ob::Error &error) {
+            log_orbbec_error("Requested Orbbec color profile failed, falling back to SDK default color", error);
+            pipeline->start(make_color_config(config, false));
+        }
+        orbbec_pipeline_ = std::move(pipeline);
+        depth_to_color_align_.reset();
+        software_depth_align_ = false;
+        orbbec_mode_ = true;
+        opened_ = true;
+        std::cerr << "Orbbec opened in color-only mode; depth frame unavailable\n";
         return true;
     } catch (const ob::Error &error) {
         log_orbbec_error("Failed to open Orbbec camera", error);
@@ -178,6 +332,8 @@ bool OrbbecCamera::open_orbbec_camera(const AppConfig &config)
     }
 
     orbbec_pipeline_.reset();
+    depth_to_color_align_.reset();
+    software_depth_align_ = false;
     orbbec_mode_ = false;
     opened_ = false;
     return false;
@@ -220,11 +376,20 @@ bool OrbbecCamera::grab_orbbec(FrameBundle *frame)
             return false;
         }
 
-        auto color_frame = frames->getFrame(OB_FRAME_COLOR);
+        std::shared_ptr<ob::FrameSet> aligned_frames = frames;
+        if (software_depth_align_ && depth_to_color_align_) {
+            auto aligned = depth_to_color_align_->process(frames);
+            if (aligned) {
+                aligned_frames = aligned->as<ob::FrameSet>();
+            }
+        }
+
+        auto color_frame = aligned_frames->getFrame(OB_FRAME_COLOR);
         frame->color_bgr = color_frame_to_bgr(color_frame);
         if (frame->color_bgr.empty()) {
             return false;
         }
+        frame->depth_mm = depth_frame_to_mm(aligned_frames->getFrame(OB_FRAME_DEPTH));
 
         const uint64_t timestamp_us = color_frame->getSystemTimeStampUs();
         if (timestamp_us > 0) {
@@ -255,11 +420,13 @@ void OrbbecCamera::close()
         }
         orbbec_pipeline_.reset();
     }
+    depth_to_color_align_.reset();
 #endif
     if (capture_.isOpened()) {
         capture_.release();
     }
     orbbec_mode_ = false;
+    software_depth_align_ = false;
     opened_ = false;
 }
 

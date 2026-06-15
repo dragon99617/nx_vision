@@ -47,6 +47,15 @@ struct DebugViewConfig {
     std::string snapshot_dir = "debug_view/snapshots";
 };
 
+struct DepthConfig {
+    bool enabled = true;
+    double min_depth_mm = 150.0;
+    double max_depth_mm = 8000.0;
+    double roi_shrink_ratio = 0.55;
+    int min_valid_samples = 30;
+    bool fallback_to_pnp = true;
+};
+
 struct RuntimeConfig {
     AppConfig app;
     VisionParams vision;
@@ -55,9 +64,9 @@ struct RuntimeConfig {
     LaserExtrinsic laser;
     SerialConfig serial;
     DebugViewConfig debug;
+    DepthConfig depth;
 };
 
 RuntimeConfig load_config(const std::string &config_dir);
 
 }  // namespace nxv
-

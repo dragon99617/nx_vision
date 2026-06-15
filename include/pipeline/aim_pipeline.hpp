@@ -2,6 +2,7 @@
 
 #include "common/config.hpp"
 #include "common/types.hpp"
+#include "pose/depth_estimator.hpp"
 #include "pose/laser_compensator.hpp"
 #include "pose/pnp_solver.hpp"
 #include "vision/target_tracker.hpp"
@@ -21,8 +22,8 @@ private:
     RuntimeConfig config_;
     TargetTracker tracker_;
     PnpSolver pnp_;
+    DepthEstimator depth_;
     LaserCompensator laser_;
 };
 
 }  // namespace nxv
-
