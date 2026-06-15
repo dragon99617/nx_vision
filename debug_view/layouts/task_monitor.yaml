@@ -1,0 +1,5 @@
+%YAML:1.0
+---
+name: task_monitor
+panels: [main, serial]
+

@@ -1,0 +1,8 @@
+%YAML:1.0
+---
+device: /dev/ttyTHS0
+baudrate: 115200
+enabled: 0
+dry_run: 1
+angle_scale_cdeg: 100
+

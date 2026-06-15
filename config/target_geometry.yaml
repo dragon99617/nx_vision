@@ -1,0 +1,7 @@
+%YAML:1.0
+---
+# Default from the previous Maix project. Replace with measured target size.
+width_mm: 265.0
+height_mm: 203.0
+circle_radius_mm: 60.0
+

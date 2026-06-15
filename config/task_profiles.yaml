@@ -1,0 +1,16 @@
+%YAML:1.0
+---
+basic_trace_only:
+  aiming_enabled: 0
+basic_static_aim:
+  timeout_s: 2.0
+basic_track_aim:
+  timeout_s: 4.0
+adv_one_lap:
+  laps: 1
+adv_two_laps:
+  laps: 2
+adv_circle_sync:
+  radius_mm: 60.0
+  period_s: 20.0
+

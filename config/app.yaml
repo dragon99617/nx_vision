@@ -1,0 +1,10 @@
+%YAML:1.0
+---
+camera_backend: opencv
+camera_index: 0
+capture_width: 1280
+capture_height: 800
+capture_fps: 60
+input_image: ""
+task: basic_static_aim
+

@@ -1,0 +1,8 @@
+%YAML:1.0
+---
+# Laser origin in camera coordinates. x right, y down, z forward.
+# Measure and tune this on the real mount.
+origin_x_mm: 0.0
+origin_y_mm: 0.0
+origin_z_mm: 0.0
+

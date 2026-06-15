@@ -1,0 +1,16 @@
+%YAML:1.0
+---
+processing_width: 640
+processing_height: 400
+threshold: 120
+blur_kernel: 5
+morph_kernel: 5
+canny_low: 50
+canny_high: 150
+min_area_px: 500.0
+approx_epsilon_ratio: 0.018
+max_side_ratio: 5.0
+min_angle_deg: 55.0
+max_angle_deg: 125.0
+use_threshold_inverse: 1
+

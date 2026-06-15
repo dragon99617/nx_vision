@@ -1,0 +1,5 @@
+%YAML:1.0
+---
+name: overview_2x2
+panels: [main, binary, edges, combined, contours, perspective, pose, serial]
+

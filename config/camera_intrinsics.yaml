@@ -1,0 +1,15 @@
+%YAML:1.0
+---
+# Replace with calibrated Gemini 336L RGB intrinsics.
+width: 1280
+height: 800
+fx: 900.0
+fy: 900.0
+cx: 640.0
+cy: 400.0
+k1: 0.0
+k2: 0.0
+p1: 0.0
+p2: 0.0
+k3: 0.0
+
