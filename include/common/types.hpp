@@ -9,12 +9,14 @@
 
 namespace nxv {
 
+//输入帧数据
 struct FrameBundle {
     cv::Mat color_bgr;
     cv::Mat depth_mm;
     double timestamp_s = 0.0;
 };
 
+//相机内参
 struct CameraIntrinsics {
     cv::Mat camera_matrix;
     cv::Mat dist_coeffs;
@@ -22,6 +24,7 @@ struct CameraIntrinsics {
     bool valid = false;
 };
 
+//纸张尺寸
 struct TargetGeometry {
     double width_mm = 265.0;
     double height_mm = 203.0;
@@ -31,10 +34,12 @@ struct TargetGeometry {
     cv::Point3d center_mm() const;
 };
 
+//激光器外参
 struct LaserExtrinsic {
     cv::Point3d origin_cam_mm = cv::Point3d(0.0, 0.0, 0.0);
 };
 
+//预处理结果
 struct PreprocessOutput {
     cv::Mat resized_bgr;
     cv::Mat gray;
@@ -47,6 +52,7 @@ struct PreprocessOutput {
     double scale_y_to_src = 1.0;
 };
 
+//矩形检测结果
 struct RectangleDetection {
     bool valid = false;
     std::vector<cv::Point2f> corners;
@@ -56,6 +62,7 @@ struct RectangleDetection {
     cv::Mat perspective_view;
 };
 
+//位姿估计结果
 struct PoseResult {
     bool valid = false;
     cv::Vec3d rvec = cv::Vec3d(0.0, 0.0, 0.0);
@@ -65,6 +72,7 @@ struct PoseResult {
     double distance_mm = 0.0;
 };
 
+//深度估计结果
 struct DepthEstimate {
     bool valid = false;
     bool used_for_aim = false;
@@ -75,6 +83,7 @@ struct DepthEstimate {
     std::string failure_reason;
 };
 
+//瞄准结果
 struct AimResult {
     bool valid = false;
     double yaw_delta_deg = 0.0;
@@ -84,6 +93,7 @@ struct AimResult {
     cv::Point3d laser_origin_cam_mm = cv::Point3d(0.0, 0.0, 0.0);
 };
 
+//整个处理流程的结果
 struct PipelineResult {
     bool valid = false;
     PreprocessOutput preprocess;
@@ -95,4 +105,4 @@ struct PipelineResult {
     std::map<std::string, cv::Mat> panels;
 };
 
-}  // namespace nxv
+}

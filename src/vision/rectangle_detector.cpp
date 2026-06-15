@@ -105,10 +105,12 @@ RectangleDetection RectangleDetector::detect(const PreprocessOutput &preprocess,
         return best;
     }
 
+    //找轮廓
     std::vector<std::vector<cv::Point>> contours;
     std::vector<cv::Vec4i> hierarchy;
     cv::findContours(preprocess.combined, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
 
+    //评估轮廓，选分数最高的
     cv::cvtColor(preprocess.combined, best.contour_overlay, cv::COLOR_GRAY2BGR);
     double best_score = -1.0;
 
@@ -118,6 +120,7 @@ RectangleDetection RectangleDetector::detect(const PreprocessOutput &preprocess,
             continue;
         }
 
+        //保留 4 个点且凸的轮廓
         const double perimeter = cv::arcLength(contours[i], true);
         std::vector<cv::Point> approx_int;
         cv::approxPolyDP(contours[i], approx_int, params.approx_epsilon_ratio * perimeter, true);
@@ -132,6 +135,7 @@ RectangleDetection RectangleDetector::detect(const PreprocessOutput &preprocess,
         }
         pts = order_corners(pts);
 
+        //检查四个角是否接近 90 度且长宽比是否合理
         bool angles_ok = true;
         double angle_deviation = 0.0;
         for (size_t j = 0; j < 4; ++j) {
