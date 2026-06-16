@@ -33,8 +33,7 @@ int main(int argc, char **argv)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
-        nxv::PipelineResult result = task->update(frame);
+        nxv::PipelineResult result = task->update(frame, false);
         serial.write_line(result.serial_packet);
     }
 }
-

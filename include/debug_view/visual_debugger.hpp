@@ -12,11 +12,11 @@ namespace nxv {
 class VisualDebugger {
 public:
     explicit VisualDebugger(DebugViewConfig config);
+    void record_serial_update();
     int show(const PipelineResult &result, const CameraIntrinsics &intrinsics);
     bool save_snapshot(const PipelineResult &result, const CameraIntrinsics &intrinsics) const;
 
 private:
-    void update_serial_fps();
     cv::Mat make_serial_panel(const std::string &serial_packet) const;
 
     DebugViewConfig config_;

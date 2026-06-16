@@ -21,6 +21,26 @@ std::string format_double(const char *name, double value, const char *unit)
     return oss.str();
 }
 
+std::string depth_status_text(const DepthEstimate &depth)
+{
+    std::ostringstream oss;
+    if (depth.valid) {
+        oss << "Depth: " << (depth.source_reused ? "reused depth" : "new depth");
+        if (depth.source_reused) {
+            oss << " age=" << std::fixed << std::setprecision(3) << depth.source_age_s << "s";
+        }
+        return oss.str();
+    }
+    if (!depth.failure_reason.empty()) {
+        oss << "Depth: " << depth.failure_reason;
+        if (depth.failure_reason.find("reused depth") == 0) {
+            oss << " age=" << std::fixed << std::setprecision(3) << depth.source_age_s << "s";
+        }
+        return oss.str();
+    }
+    return "Depth: unavailable";
+}
+
 std::vector<cv::Point> to_points(const std::vector<cv::Point2f> &pts)
 {
     std::vector<cv::Point> out;
@@ -47,12 +67,16 @@ cv::Mat OverlayDrawer::draw_main_overlay(const cv::Mat &color_bgr, const Pipelin
         put_label(overlay, format_double("Pitch", result.aim.pitch_delta_deg, " deg"), 48, cv::Scalar(0, 255, 0));
         put_label(overlay, format_double("Distance", result.aim.distance_mm, " mm"), 72, cv::Scalar(0, 255, 0));
         if (result.depth.used_for_aim) {
-            put_label(overlay, "Distance source: depth", 96, cv::Scalar(0, 255, 0));
+            put_label(overlay,
+                      result.depth.source_reused ? "Distance source: depth reused" : "Distance source: depth",
+                      96,
+                      cv::Scalar(0, 255, 0));
         } else if (result.depth.fallback_used) {
             put_label(overlay, "Distance source: pnp fallback", 96, cv::Scalar(0, 255, 255));
         } else {
             put_label(overlay, "Distance source: pnp", 96, cv::Scalar(0, 255, 255));
         }
+        put_label(overlay, depth_status_text(result.depth), 120, cv::Scalar(255, 255, 0));
     } else {
         put_label(overlay, "NO VALID TARGET", 24, cv::Scalar(0, 0, 255));
         if (!result.depth.failure_reason.empty()) {

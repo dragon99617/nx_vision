@@ -19,7 +19,7 @@ VisualDebugger::VisualDebugger(DebugViewConfig config)
 {
 }
 
-void VisualDebugger::update_serial_fps()
+void VisualDebugger::record_serial_update()
 {
     const auto now = std::chrono::steady_clock::now();
     if (!has_serial_time_) {
@@ -61,7 +61,6 @@ int VisualDebugger::show(const PipelineResult &result, const CameraIntrinsics &i
     if (!config_.show_windows) {
         return -1;
     }
-    update_serial_fps();
 
     std::map<std::string, cv::Mat> panels = result.panels;
     panels["main"] = overlay_.draw_main_overlay(result.panels.count("raw") ? result.panels.at("raw") : cv::Mat(), result);

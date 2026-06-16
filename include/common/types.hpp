@@ -14,6 +14,9 @@ struct FrameBundle {
     cv::Mat color_bgr;
     cv::Mat depth_mm;
     double timestamp_s = 0.0;
+    double depth_timestamp_s = 0.0;
+    bool depth_reused = false;
+    double depth_age_s = 0.0;
 };
 
 //相机内参
@@ -77,6 +80,8 @@ struct DepthEstimate {
     bool valid = false;
     bool used_for_aim = false;
     bool fallback_used = false;
+    bool source_reused = false;
+    double source_age_s = 0.0;
     cv::Point3d target_cam_mm = cv::Point3d(0.0, 0.0, 0.0);
     double depth_mm = 0.0;
     int valid_sample_count = 0;

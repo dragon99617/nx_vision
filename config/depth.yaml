@@ -6,3 +6,5 @@ max_depth_mm: 8000.0
 roi_shrink_ratio: 0.55
 min_valid_samples: 30
 fallback_to_pnp: 0
+reuse_last_depth: 1
+max_reused_depth_age_s: 0.10

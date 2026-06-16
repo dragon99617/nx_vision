@@ -98,7 +98,9 @@ std::vector<cv::Point2f> RectangleDetector::order_corners(const std::vector<cv::
     return ordered;
 }
 
-RectangleDetection RectangleDetector::detect(const PreprocessOutput &preprocess, const VisionParams &params) const
+RectangleDetection RectangleDetector::detect(const PreprocessOutput &preprocess,
+                                             const VisionParams &params,
+                                             bool make_debug_images) const
 {
     RectangleDetection best;
     if (preprocess.combined.empty()) {
@@ -111,7 +113,9 @@ RectangleDetection RectangleDetector::detect(const PreprocessOutput &preprocess,
     cv::findContours(preprocess.combined, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
 
     //评估轮廓，选分数最高的
-    cv::cvtColor(preprocess.combined, best.contour_overlay, cv::COLOR_GRAY2BGR);
+    if (make_debug_images) {
+        cv::cvtColor(preprocess.combined, best.contour_overlay, cv::COLOR_GRAY2BGR);
+    }
     double best_score = -1.0;
 
     for (size_t i = 0; i < contours.size(); ++i) {
@@ -153,7 +157,9 @@ RectangleDetection RectangleDetector::detect(const PreprocessOutput &preprocess,
         }
         const double score = area * 0.001 + (100.0 - angle_deviation * 0.25) + child_bonus;
 
-        cv::polylines(best.contour_overlay, to_points(pts), true, cv::Scalar(0, 180, 255), 1);
+        if (make_debug_images) {
+            cv::polylines(best.contour_overlay, to_points(pts), true, cv::Scalar(0, 180, 255), 1);
+        }
 
         if (score > best_score) {
             best_score = score;
@@ -177,13 +183,15 @@ RectangleDetection RectangleDetector::detect(const PreprocessOutput &preprocess,
             pt.x /= static_cast<float>(preprocess.scale_x_to_src);
             pt.y /= static_cast<float>(preprocess.scale_y_to_src);
         }
-        cv::polylines(best.contour_overlay, to_points(debug_pts), true, cv::Scalar(0, 255, 0), 2);
+        if (make_debug_images) {
+            cv::polylines(best.contour_overlay, to_points(debug_pts), true, cv::Scalar(0, 255, 0), 2);
 
-        const float view_w = 445.0f;
-        const float view_h = 315.0f;
-        std::vector<cv::Point2f> dst = {{0.0f, 0.0f}, {view_w, 0.0f}, {view_w, view_h}, {0.0f, view_h}};
-        cv::Mat H = cv::getPerspectiveTransform(debug_pts, dst);
-        cv::warpPerspective(preprocess.resized_bgr, best.perspective_view, H, cv::Size(static_cast<int>(view_w), static_cast<int>(view_h)));
+            const float view_w = 445.0f;
+            const float view_h = 315.0f;
+            std::vector<cv::Point2f> dst = {{0.0f, 0.0f}, {view_w, 0.0f}, {view_w, view_h}, {0.0f, view_h}};
+            cv::Mat H = cv::getPerspectiveTransform(debug_pts, dst);
+            cv::warpPerspective(preprocess.resized_bgr, best.perspective_view, H, cv::Size(static_cast<int>(view_w), static_cast<int>(view_h)));
+        }
     }
 
     return best;

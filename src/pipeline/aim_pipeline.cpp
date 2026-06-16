@@ -75,17 +75,21 @@ AimPipeline::AimPipeline(RuntimeConfig config)
 {
 }
 
-PipelineResult AimPipeline::process(const FrameBundle &frame)
+PipelineResult AimPipeline::process(const FrameBundle &frame, bool make_debug_panels)
 {
-    return process_impl(frame, config_.target.center_mm());
+    return process_impl(frame, config_.target.center_mm(), make_debug_panels);
 }
 
-PipelineResult AimPipeline::process_board_point(const FrameBundle &frame, const cv::Point3d &board_point_mm)
+PipelineResult AimPipeline::process_board_point(const FrameBundle &frame,
+                                                const cv::Point3d &board_point_mm,
+                                                bool make_debug_panels)
 {
-    return process_impl(frame, board_point_mm);
+    return process_impl(frame, board_point_mm, make_debug_panels);
 }
 
-PipelineResult AimPipeline::process_impl(const FrameBundle &frame, const cv::Point3d &board_point_mm)
+PipelineResult AimPipeline::process_impl(const FrameBundle &frame,
+                                         const cv::Point3d &board_point_mm,
+                                         bool make_debug_panels)
 {
     PipelineResult result;
     if (frame.color_bgr.empty()) {
@@ -96,18 +100,36 @@ PipelineResult AimPipeline::process_impl(const FrameBundle &frame, const cv::Poi
 
     result.preprocess = run_preprocess(frame.color_bgr, config_.vision);
     RectangleDetector detector;
-    result.rectangle = detector.detect(result.preprocess, config_.vision);
+    result.rectangle = detector.detect(result.preprocess, config_.vision, make_debug_panels);
     result.pose = pnp_.solve(result.rectangle, config_.intrinsics, config_.target);
 
     const cv::Point2f target_px = project_board_point_to_image(board_point_mm,
                                                                result.pose,
                                                                config_.intrinsics,
                                                                result.rectangle.center);
-    result.depth = depth_.estimate(frame.depth_mm,
+    cv::Mat depth_for_estimate = frame.depth_mm;
+    std::string rejected_reused_depth_reason;
+    if (frame.depth_reused) {
+        if (!config_.depth.reuse_last_depth) {
+            depth_for_estimate.release();
+            rejected_reused_depth_reason = "reused depth disabled";
+        } else if (config_.depth.max_reused_depth_age_s > 0.0 &&
+                   frame.depth_age_s > config_.depth.max_reused_depth_age_s) {
+            depth_for_estimate.release();
+            rejected_reused_depth_reason = "reused depth expired";
+        }
+    }
+
+    result.depth = depth_.estimate(depth_for_estimate,
                                    result.rectangle,
                                    config_.intrinsics,
                                    config_.depth,
                                    target_px);
+    result.depth.source_reused = frame.depth_reused && !depth_for_estimate.empty();
+    result.depth.source_age_s = frame.depth_age_s;
+    if (!rejected_reused_depth_reason.empty() && result.depth.failure_reason == "missing depth frame") {
+        result.depth.failure_reason = rejected_reused_depth_reason;
+    }
 
     cv::Point3d pnp_target_cam = result.pose.target_cam_mm;
     if (result.pose.valid) {
@@ -134,13 +156,15 @@ PipelineResult AimPipeline::process_impl(const FrameBundle &frame, const cv::Poi
     GimbalProtocol protocol(config_.serial);
     result.serial_packet = protocol.make_packet(result.aim);
 
-    result.panels["raw"] = frame.color_bgr;
-    result.panels["binary"] = result.preprocess.binary;
-    result.panels["edges"] = result.preprocess.edges;
-    result.panels["combined"] = result.preprocess.combined;
-    result.panels["contours"] = result.rectangle.contour_overlay;
-    result.panels["perspective"] = result.rectangle.perspective_view;
-    result.panels["depth"] = make_depth_preview(frame.depth_mm, config_.depth.max_depth_mm);
+    if (make_debug_panels) {
+        result.panels["raw"] = frame.color_bgr;
+        result.panels["binary"] = result.preprocess.binary;
+        result.panels["edges"] = result.preprocess.edges;
+        result.panels["combined"] = result.preprocess.combined;
+        result.panels["contours"] = result.rectangle.contour_overlay;
+        result.panels["perspective"] = result.rectangle.perspective_view;
+        result.panels["depth"] = make_depth_preview(depth_for_estimate, config_.depth.max_depth_mm);
+    }
     return result;
 }
 

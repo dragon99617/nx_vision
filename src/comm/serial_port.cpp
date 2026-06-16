@@ -83,7 +83,7 @@ bool SerialPort::open(const SerialConfig &config)
 bool SerialPort::write_line(const std::string &line)
 {
     if (!config_.enabled || config_.dry_run) {
-        std::cout << "[serial] " << line;
+        (void)line;
         return true;
     }
 
@@ -114,4 +114,3 @@ bool SerialPort::is_open() const
 }
 
 }  // namespace nxv
-

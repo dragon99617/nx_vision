@@ -7,6 +7,7 @@
 #include <libobsensor/ObSensor.hpp>
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cctype>
 #include <iostream>
@@ -27,6 +28,12 @@ void set_steady_timestamp(FrameBundle *frame)
 {
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
     frame->timestamp_s = std::chrono::duration<double>(now).count();
+}
+
+double steady_timestamp_s()
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration<double>(now).count();
 }
 
 #ifdef NXVISION_WITH_ORBBEC
@@ -68,6 +75,50 @@ bool depth_profile_supported_for_d2c(const std::shared_ptr<ob::Pipeline> &pipeli
         }
     }
     return false;
+}
+
+std::string describe_video_profile(const std::shared_ptr<ob::StreamProfile> &profile)
+{
+    if (!profile) {
+        return "none";
+    }
+    const auto video = profile->as<ob::VideoStreamProfile>();
+    return std::to_string(video->getWidth()) + "x" +
+           std::to_string(video->getHeight()) + "@" +
+           std::to_string(video->getFps()) + " format=" +
+           std::to_string(static_cast<int>(video->getFormat()));
+}
+
+std::shared_ptr<ob::StreamProfile> find_video_profile(const std::shared_ptr<ob::Pipeline> &pipeline,
+                                                      OBSensorType sensor,
+                                                      int width,
+                                                      int height,
+                                                      int fps,
+                                                      OBFormat preferred_format,
+                                                      bool allow_any_format)
+{
+    auto profiles = pipeline->getStreamProfileList(sensor);
+    std::shared_ptr<ob::StreamProfile> fallback;
+    for (uint32_t i = 0; i < profiles->getCount(); ++i) {
+        auto profile = profiles->getProfile(i);
+        const auto video = profile->as<ob::VideoStreamProfile>();
+        if (width > 0 && static_cast<int>(video->getWidth()) != width) {
+            continue;
+        }
+        if (height > 0 && static_cast<int>(video->getHeight()) != height) {
+            continue;
+        }
+        if (fps > 0 && static_cast<int>(video->getFps()) != fps) {
+            continue;
+        }
+        if (video->getFormat() == preferred_format) {
+            return profile;
+        }
+        if (allow_any_format && !fallback) {
+            fallback = profile;
+        }
+    }
+    return fallback;
 }
 
 std::shared_ptr<ob::Config> make_hw_d2c_config(const std::shared_ptr<ob::Pipeline> &pipeline,
@@ -116,6 +167,37 @@ std::shared_ptr<ob::Config> make_rgbd_config(const AppConfig &app_config, bool u
     }
     stream_config->enableVideoStream(OB_STREAM_DEPTH, OB_WIDTH_ANY, OB_HEIGHT_ANY, OB_FPS_ANY, OB_FORMAT_Y16);
     stream_config->setFrameAggregateOutputMode(OB_FRAME_AGGREGATE_OUTPUT_ALL_TYPE_FRAME_REQUIRE);
+    return stream_config;
+}
+
+std::shared_ptr<ob::Config> make_mixed_rgbd_config(const std::shared_ptr<ob::Pipeline> &pipeline,
+                                                   const AppConfig &app_config)
+{
+    auto color_profile = find_video_profile(pipeline,
+                                            OB_SENSOR_COLOR,
+                                            app_config.capture_width,
+                                            app_config.capture_height,
+                                            app_config.capture_fps,
+                                            OB_FORMAT_MJPG,
+                                            true);
+    auto depth_profile = find_video_profile(pipeline,
+                                            OB_SENSOR_DEPTH,
+                                            app_config.capture_width,
+                                            app_config.capture_height,
+                                            app_config.depth_fps,
+                                            OB_FORMAT_Y16,
+                                            false);
+    if (!color_profile || !depth_profile) {
+        return nullptr;
+    }
+
+    std::cout << "Selected mixed Orbbec color profile: " << describe_video_profile(color_profile) << "\n";
+    std::cout << "Selected mixed Orbbec depth profile: " << describe_video_profile(depth_profile) << "\n";
+
+    auto stream_config = std::make_shared<ob::Config>();
+    stream_config->enableStream(color_profile);
+    stream_config->enableStream(depth_profile);
+    stream_config->setFrameAggregateOutputMode(OB_FRAME_AGGREGATE_OUTPUT_ANY_SITUATION);
     return stream_config;
 }
 
@@ -219,12 +301,28 @@ cv::Mat depth_frame_to_mm(const std::shared_ptr<ob::Frame> &depth_frame)
     raw.convertTo(depth_mm, CV_32FC1, depth->getValueScale());
     return depth_mm;
 }
+
+double frame_timestamp_s(const std::shared_ptr<ob::Frame> &frame)
+{
+    if (!frame) {
+        return steady_timestamp_s();
+    }
+    const uint64_t timestamp_us = frame->getSystemTimeStampUs();
+    if (timestamp_us > 0) {
+        return static_cast<double>(timestamp_us) / 1'000'000.0;
+    }
+    return steady_timestamp_s();
+}
 #endif
 
 }  // namespace
 
 bool OrbbecCamera::open(const AppConfig &config)
 {
+    app_config_ = config;
+    last_depth_mm_.release();
+    last_depth_timestamp_s_ = 0.0;
+
     if (!config.input_image.empty()) {
         return load_static_image(config.input_image);
     }
@@ -281,6 +379,28 @@ bool OrbbecCamera::open_orbbec_camera(const AppConfig &config)
         log_orbbec_error("Hardware depth-to-color alignment failed", error);
     } catch (const std::exception &error) {
         std::cerr << "Hardware depth-to-color alignment failed: " << error.what() << "\n";
+    }
+
+    if (config.allow_mixed_rgbd_fps) {
+        try {
+            auto pipeline = std::make_shared<ob::Pipeline>();
+            auto stream_config = make_mixed_rgbd_config(pipeline, config);
+            if (stream_config) {
+                pipeline->start(stream_config);
+                orbbec_pipeline_ = std::move(pipeline);
+                depth_to_color_align_ = std::make_shared<ob::Align>(OB_STREAM_COLOR);
+                software_depth_align_ = true;
+                orbbec_mode_ = true;
+                opened_ = true;
+                std::cout << "Orbbec mixed RGBD enabled with software depth-to-color alignment\n";
+                return true;
+            }
+            std::cerr << "Requested mixed Orbbec RGBD profiles unavailable; trying synchronized RGBD\n";
+        } catch (const ob::Error &error) {
+            log_orbbec_error("Failed to open mixed Orbbec RGBD streams", error);
+        } catch (const std::exception &error) {
+            std::cerr << "Failed to open mixed Orbbec RGBD streams: " << error.what() << "\n";
+        }
     }
 
     try {
@@ -371,33 +491,58 @@ bool OrbbecCamera::grab_orbbec(FrameBundle *frame)
 {
 #ifdef NXVISION_WITH_ORBBEC
     try {
-        auto frames = orbbec_pipeline_->waitForFrameset(100);
-        if (!frames) {
-            return false;
-        }
-
-        std::shared_ptr<ob::FrameSet> aligned_frames = frames;
-        if (software_depth_align_ && depth_to_color_align_) {
-            auto aligned = depth_to_color_align_->process(frames);
-            if (aligned) {
-                aligned_frames = aligned->as<ob::FrameSet>();
+        const double deadline_s = steady_timestamp_s() + 0.20;
+        while (steady_timestamp_s() < deadline_s) {
+            auto frames = orbbec_pipeline_->waitForFrameset(50);
+            if (!frames) {
+                continue;
             }
-        }
 
-        auto color_frame = aligned_frames->getFrame(OB_FRAME_COLOR);
-        frame->color_bgr = color_frame_to_bgr(color_frame);
-        if (frame->color_bgr.empty()) {
-            return false;
-        }
-        frame->depth_mm = depth_frame_to_mm(aligned_frames->getFrame(OB_FRAME_DEPTH));
+            std::shared_ptr<ob::FrameSet> aligned_frames = frames;
+            if (software_depth_align_ && depth_to_color_align_) {
+                auto aligned = depth_to_color_align_->process(frames);
+                if (aligned) {
+                    aligned_frames = aligned->as<ob::FrameSet>();
+                }
+            }
 
-        const uint64_t timestamp_us = color_frame->getSystemTimeStampUs();
-        if (timestamp_us > 0) {
-            frame->timestamp_s = static_cast<double>(timestamp_us) / 1'000'000.0;
-        } else {
-            set_steady_timestamp(frame);
+            auto depth_frame = aligned_frames->getFrame(OB_FRAME_DEPTH);
+            cv::Mat new_depth_mm = depth_frame_to_mm(depth_frame);
+            double new_depth_timestamp_s = 0.0;
+            if (!new_depth_mm.empty()) {
+                new_depth_timestamp_s = frame_timestamp_s(depth_frame);
+                last_depth_mm_ = new_depth_mm.clone();
+                last_depth_timestamp_s_ = new_depth_timestamp_s;
+            }
+
+            auto color_frame = aligned_frames->getFrame(OB_FRAME_COLOR);
+            if (!color_frame) {
+                continue;
+            }
+
+            frame->color_bgr = color_frame_to_bgr(color_frame);
+            if (frame->color_bgr.empty()) {
+                continue;
+            }
+
+            frame->timestamp_s = frame_timestamp_s(color_frame);
+            frame->depth_mm.release();
+            frame->depth_timestamp_s = 0.0;
+            frame->depth_reused = false;
+            frame->depth_age_s = 0.0;
+
+            if (!new_depth_mm.empty()) {
+                frame->depth_mm = std::move(new_depth_mm);
+                frame->depth_timestamp_s = new_depth_timestamp_s;
+                frame->depth_age_s = std::max(0.0, frame->timestamp_s - frame->depth_timestamp_s);
+            } else if (!last_depth_mm_.empty()) {
+                frame->depth_mm = last_depth_mm_.clone();
+                frame->depth_timestamp_s = last_depth_timestamp_s_;
+                frame->depth_reused = true;
+                frame->depth_age_s = std::max(0.0, frame->timestamp_s - frame->depth_timestamp_s);
+            }
+            return true;
         }
-        return true;
     } catch (const ob::Error &error) {
         log_orbbec_error("Failed to grab Orbbec frame", error);
     } catch (const std::exception &error) {

@@ -29,8 +29,11 @@ private:
     bool open_orbbec_camera(const AppConfig &config);
     bool grab_orbbec(FrameBundle *frame);
 
+    AppConfig app_config_;
     cv::VideoCapture capture_;
     cv::Mat static_image_;
+    cv::Mat last_depth_mm_;
+    double last_depth_timestamp_s_ = 0.0;
 #ifdef NXVISION_WITH_ORBBEC
     std::shared_ptr<ob::Pipeline> orbbec_pipeline_;
     std::shared_ptr<ob::Align> depth_to_color_align_;

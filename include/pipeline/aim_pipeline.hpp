@@ -13,11 +13,15 @@ class AimPipeline {
 public:
     explicit AimPipeline(RuntimeConfig config);
 
-    PipelineResult process(const FrameBundle &frame);
-    PipelineResult process_board_point(const FrameBundle &frame, const cv::Point3d &board_point_mm);
+    PipelineResult process(const FrameBundle &frame, bool make_debug_panels = true);
+    PipelineResult process_board_point(const FrameBundle &frame,
+                                       const cv::Point3d &board_point_mm,
+                                       bool make_debug_panels = true);
 
 private:
-    PipelineResult process_impl(const FrameBundle &frame, const cv::Point3d &board_point_mm);
+    PipelineResult process_impl(const FrameBundle &frame,
+                                const cv::Point3d &board_point_mm,
+                                bool make_debug_panels);
 
     RuntimeConfig config_;
     TargetTracker tracker_;

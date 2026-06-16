@@ -12,6 +12,8 @@ struct AppConfig {
     int capture_width = 1280;
     int capture_height = 800;
     int capture_fps = 60;
+    int depth_fps = 30;
+    bool allow_mixed_rgbd_fps = true;
     std::string input_image;
     std::string task = "basic_static_aim";
 };
@@ -44,6 +46,7 @@ struct DebugViewConfig {
     bool show_windows = true;
     int panel_width = 480;
     int panel_height = 300;
+    double debug_fps = 15.0;
     std::string snapshot_dir = "debug_view/snapshots";
 };
 
@@ -54,6 +57,8 @@ struct DepthConfig {
     double roi_shrink_ratio = 0.55;
     int min_valid_samples = 30;
     bool fallback_to_pnp = true;
+    bool reuse_last_depth = true;
+    double max_reused_depth_age_s = 0.10;
 };
 
 struct RuntimeConfig {

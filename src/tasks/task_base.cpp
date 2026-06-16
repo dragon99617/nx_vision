@@ -12,9 +12,10 @@ class BasicTraceOnlyTask final : public TaskBase {
 public:
     using TaskBase::TaskBase;
     std::string name() const override { return "basic_trace_only"; }
-    PipelineResult update(const FrameBundle &frame) override
+    PipelineResult update(const FrameBundle &frame, bool make_debug_panels) override
     {
         (void)frame;
+        (void)make_debug_panels;
         PipelineResult result;
         result.serial_packet = "A,0,0,0,0\n";
         return result;
@@ -29,7 +30,10 @@ public:
     }
 
     std::string name() const override { return task_name_; }
-    PipelineResult update(const FrameBundle &frame) override { return pipeline_.process(frame); }
+    PipelineResult update(const FrameBundle &frame, bool make_debug_panels) override
+    {
+        return pipeline_.process(frame, make_debug_panels);
+    }
 
 private:
     std::string task_name_;
@@ -39,7 +43,7 @@ class CircleSyncTask final : public TaskBase {
 public:
     using TaskBase::TaskBase;
     std::string name() const override { return "adv_circle_sync"; }
-    PipelineResult update(const FrameBundle &frame) override
+    PipelineResult update(const FrameBundle &frame, bool make_debug_panels) override
     {
         const double now = frame.timestamp_s;
         const double period_s = 20.0;
@@ -47,7 +51,7 @@ public:
         const double angle = 2.0 * kPi * phase;
         const double r = config_.target.circle_radius_mm;
         const cv::Point3d board_point(r * std::cos(angle), r * std::sin(angle), 0.0);
-        return pipeline_.process_board_point(frame, board_point);
+        return pipeline_.process_board_point(frame, board_point, make_debug_panels);
     }
 };
 

@@ -30,6 +30,8 @@ void load_app(const std::string &dir, AppConfig *config)
     read_value(fs, "capture_width", &config->capture_width);
     read_value(fs, "capture_height", &config->capture_height);
     read_value(fs, "capture_fps", &config->capture_fps);
+    read_value(fs, "depth_fps", &config->depth_fps);
+    read_value(fs, "allow_mixed_rgbd_fps", &config->allow_mixed_rgbd_fps);
     read_value(fs, "input_image", &config->input_image);
     read_value(fs, "task", &config->task);
 }
@@ -119,6 +121,7 @@ void load_debug(const std::string &dir, DebugViewConfig *config)
     read_value(fs, "show_windows", &config->show_windows);
     read_value(fs, "panel_width", &config->panel_width);
     read_value(fs, "panel_height", &config->panel_height);
+    read_value(fs, "debug_fps", &config->debug_fps);
     read_value(fs, "snapshot_dir", &config->snapshot_dir);
 }
 
@@ -131,6 +134,8 @@ void load_depth(const std::string &dir, DepthConfig *config)
     read_value(fs, "roi_shrink_ratio", &config->roi_shrink_ratio);
     read_value(fs, "min_valid_samples", &config->min_valid_samples);
     read_value(fs, "fallback_to_pnp", &config->fallback_to_pnp);
+    read_value(fs, "reuse_last_depth", &config->reuse_last_depth);
+    read_value(fs, "max_reused_depth_age_s", &config->max_reused_depth_age_s);
 }
 
 }  // namespace

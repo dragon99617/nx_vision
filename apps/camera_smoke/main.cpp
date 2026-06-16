@@ -16,20 +16,50 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    for (int attempt = 0; attempt < 120; ++attempt) {
+    nxv::FrameBundle last_color_frame;
+    int color_frames = 0;
+    int new_depth_frames = 0;
+    int reused_depth_frames = 0;
+    int missing_depth_frames = 0;
+    const auto started = std::chrono::steady_clock::now();
+
+    for (int attempt = 0; attempt < 180; ++attempt) {
         nxv::FrameBundle frame;
         if (camera.grab(&frame) && !frame.color_bgr.empty()) {
-            std::cout << "camera ok: " << frame.color_bgr.cols << "x" << frame.color_bgr.rows
-                      << " timestamp_s=" << frame.timestamp_s;
-            if (!frame.depth_mm.empty()) {
-                std::cout << " depth=" << frame.depth_mm.cols << "x" << frame.depth_mm.rows;
+            last_color_frame = frame;
+            ++color_frames;
+            if (frame.depth_mm.empty()) {
+                ++missing_depth_frames;
+            } else if (frame.depth_reused) {
+                ++reused_depth_frames;
             } else {
-                std::cout << " depth=unavailable";
+                ++new_depth_frames;
             }
-            std::cout << "\n";
-            return 0;
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (std::chrono::steady_clock::now() - started > std::chrono::seconds(2)) {
+            break;
+        }
+    }
+
+    if (!last_color_frame.color_bgr.empty()) {
+        const double elapsed_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        std::cout << "camera ok: " << last_color_frame.color_bgr.cols << "x" << last_color_frame.color_bgr.rows
+                  << " frames=" << color_frames
+                  << " fps=" << (elapsed_s > 0.0 ? static_cast<double>(color_frames) / elapsed_s : 0.0)
+                  << " new_depth=" << new_depth_frames
+                  << " reused_depth=" << reused_depth_frames
+                  << " missing_depth=" << missing_depth_frames;
+        if (!last_color_frame.depth_mm.empty()) {
+            std::cout << " depth=" << last_color_frame.depth_mm.cols << "x" << last_color_frame.depth_mm.rows
+                      << (last_color_frame.depth_reused ? " reused" : " new")
+                      << " depth_age_s=" << last_color_frame.depth_age_s;
+        } else {
+            std::cout << " depth=unavailable";
+        }
+        std::cout << "\n";
+        return 0;
     }
 
     std::cerr << "Camera opened, but no color frame arrived\n";
