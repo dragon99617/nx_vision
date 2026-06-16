@@ -109,8 +109,9 @@ int main(int argc, char **argv)
 
         nxv::PipelineResult result = task->update(frame, render_debug);
         const auto after_pipeline = Clock::now();
-        serial.write_line(result.serial_packet);
-        debugger.record_serial_update();
+        if (serial.write_line(result.serial_packet)) {
+            debugger.record_serial_update();
+        }
         const auto after_serial = Clock::now();
 
         double debug_ms = 0.0;
