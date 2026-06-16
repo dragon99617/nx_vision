@@ -1,8 +1,7 @@
 %YAML:1.0
 ---
-device: /dev/ttyTHS0
+device: /dev/serial/by-id/usb-STMicroelectronics_STM32_Virtual_ComPort_315636613233-if00
 baudrate: 115200
-enabled: 0
-dry_run: 1
+enabled: 1
+dry_run: 0
 angle_scale_cdeg: 100
-

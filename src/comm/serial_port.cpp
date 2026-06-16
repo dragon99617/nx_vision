@@ -1,10 +1,16 @@
 //串口通信实现
 #include "comm/serial_port.hpp"
 
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <vector>
 
 #ifndef _WIN32
 #include <fcntl.h>
+#include <poll.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -13,6 +19,33 @@ namespace nxv {
 namespace {
 
 #ifndef _WIN32
+std::string resolve_serial_device(const std::string &configured_device)
+{
+    if (configured_device != "auto") {
+        return configured_device;
+    }
+
+    std::vector<std::string> candidates;
+    const std::filesystem::path by_id_dir("/dev/serial/by-id");
+    if (std::filesystem::exists(by_id_dir)) {
+        for (const auto &entry : std::filesystem::directory_iterator(by_id_dir)) {
+            candidates.push_back(entry.path().string());
+        }
+    }
+    for (const char *prefix : {"/dev/ttyACM", "/dev/ttyUSB"}) {
+        for (int i = 0; i < 10; ++i) {
+            const std::string path = std::string(prefix) + std::to_string(i);
+            if (std::filesystem::exists(path)) {
+                candidates.push_back(path);
+            }
+        }
+    }
+
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+    return candidates.empty() ? configured_device : candidates.front();
+}
+
 speed_t baud_to_speed(int baudrate)
 {
     switch (baudrate) {
@@ -47,11 +80,18 @@ bool SerialPort::open(const SerialConfig &config)
     std::cerr << "[serial] real serial is not implemented on Windows in this project\n";
     return false;
 #else
-    fd_ = ::open(config.device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+    const std::string device = resolve_serial_device(config.device);
+    if (device == "auto") {
+        std::cerr << "[serial] no USB serial device found. Expected /dev/ttyACM*, /dev/ttyUSB*, or /dev/serial/by-id/*\n";
+        return false;
+    }
+
+    fd_ = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd_ < 0) {
         perror("[serial] open");
         return false;
     }
+    config_.device = device;
 
     termios tty {};
     if (tcgetattr(fd_, &tty) != 0) {
@@ -76,6 +116,7 @@ bool SerialPort::open(const SerialConfig &config)
         return false;
     }
 
+    std::cout << "[serial] opened " << device << " @ " << config.baudrate << "\n";
     return true;
 #endif
 }
@@ -93,8 +134,30 @@ bool SerialPort::write_line(const std::string &line)
     if (fd_ < 0) {
         return false;
     }
-    const ssize_t written = ::write(fd_, line.data(), line.size());
-    return written == static_cast<ssize_t>(line.size());
+    size_t offset = 0;
+    while (offset < line.size()) {
+        const ssize_t written = ::write(fd_, line.data() + offset, line.size() - offset);
+        if (written > 0) {
+            offset += static_cast<size_t>(written);
+            continue;
+        }
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
+        if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            pollfd pfd {};
+            pfd.fd = fd_;
+            pfd.events = POLLOUT;
+            const int ready = ::poll(&pfd, 1, 10);
+            if (ready > 0) {
+                continue;
+            }
+            return false;
+        }
+        std::cerr << "[serial] write failed: " << std::strerror(errno) << "\n";
+        return false;
+    }
+    return true;
 #endif
 }
 
