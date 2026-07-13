@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <iostream>
 #include <memory>
 
@@ -22,12 +23,6 @@ std::string to_lower(std::string value)
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     }
     return value;
-}
-
-void set_steady_timestamp(FrameBundle *frame)
-{
-    const auto now = std::chrono::steady_clock::now().time_since_epoch();
-    frame->timestamp_s = std::chrono::duration<double>(now).count();
 }
 
 double steady_timestamp_s()
@@ -302,16 +297,12 @@ cv::Mat depth_frame_to_mm(const std::shared_ptr<ob::Frame> &depth_frame)
     return depth_mm;
 }
 
-double frame_timestamp_s(const std::shared_ptr<ob::Frame> &frame)
+uint64_t frame_system_timestamp_us(const std::shared_ptr<ob::Frame> &frame)
 {
     if (!frame) {
-        return steady_timestamp_s();
+        return 0;
     }
-    const uint64_t timestamp_us = frame->getSystemTimeStampUs();
-    if (timestamp_us > 0) {
-        return static_cast<double>(timestamp_us) / 1'000'000.0;
-    }
-    return steady_timestamp_s();
+    return frame->getSystemTimeStampUs();
 }
 #endif
 
@@ -322,6 +313,9 @@ bool OrbbecCamera::open(const AppConfig &config)
     app_config_ = config;
     last_depth_mm_.release();
     last_depth_timestamp_s_ = 0.0;
+    system_to_steady_offset_s_ = 0.0;
+    has_system_to_steady_offset_ = false;
+    next_sequence_ = 0;
 
     if (!config.input_image.empty()) {
         return load_static_image(config.input_image);
@@ -473,7 +467,7 @@ bool OrbbecCamera::grab(FrameBundle *frame)
 
     if (static_mode_) {
         frame->color_bgr = static_image_.clone();
-        set_steady_timestamp(frame);
+        assign_fallback_metadata(frame);
         return true;
     }
 
@@ -483,8 +477,43 @@ bool OrbbecCamera::grab(FrameBundle *frame)
         return false;
     }
 
-    set_steady_timestamp(frame);
+    assign_fallback_metadata(frame);
     return true;
+}
+
+double OrbbecCamera::map_system_timestamp_us(uint64_t timestamp_us,
+                                             double receive_time_s,
+                                             bool *reliable)
+{
+    if (reliable != nullptr) {
+        *reliable = false;
+    }
+    if (timestamp_us == 0) {
+        return receive_time_s;
+    }
+
+    constexpr double kTimestampJumpThresholdS = 0.100;
+    const double camera_system_s = static_cast<double>(timestamp_us) / 1'000'000.0;
+    const double candidate_offset_s = receive_time_s - camera_system_s;
+    if (!has_system_to_steady_offset_ ||
+        std::abs(candidate_offset_s - system_to_steady_offset_s_) >
+            kTimestampJumpThresholdS) {
+        system_to_steady_offset_s_ = candidate_offset_s;
+        has_system_to_steady_offset_ = true;
+        return receive_time_s;
+    }
+
+    if (reliable != nullptr) {
+        *reliable = true;
+    }
+    return camera_system_s + system_to_steady_offset_s_;
+}
+
+void OrbbecCamera::assign_fallback_metadata(FrameBundle *frame)
+{
+    frame->sequence = next_sequence_++;
+    frame->timestamp_s = steady_timestamp_s();
+    frame->timestamp_reliable = false;
 }
 
 bool OrbbecCamera::grab_orbbec(FrameBundle *frame)
@@ -497,6 +526,7 @@ bool OrbbecCamera::grab_orbbec(FrameBundle *frame)
             if (!frames) {
                 continue;
             }
+            const double receive_time_s = steady_timestamp_s();
 
             std::shared_ptr<ob::FrameSet> aligned_frames = frames;
             if (software_depth_align_ && depth_to_color_align_) {
@@ -508,30 +538,49 @@ bool OrbbecCamera::grab_orbbec(FrameBundle *frame)
 
             auto depth_frame = aligned_frames->getFrame(OB_FRAME_DEPTH);
             cv::Mat new_depth_mm = depth_frame_to_mm(depth_frame);
-            double new_depth_timestamp_s = 0.0;
-            if (!new_depth_mm.empty()) {
-                new_depth_timestamp_s = frame_timestamp_s(depth_frame);
-                last_depth_mm_ = new_depth_mm.clone();
-                last_depth_timestamp_s_ = new_depth_timestamp_s;
-            }
+            const uint64_t depth_system_timestamp_us =
+                frame_system_timestamp_us(depth_frame);
+            const auto mapped_depth_timestamp_s = [&]() {
+                return depth_system_timestamp_us > 0 &&
+                               has_system_to_steady_offset_
+                           ? static_cast<double>(depth_system_timestamp_us) /
+                                     1'000'000.0 +
+                                 system_to_steady_offset_s_
+                           : receive_time_s;
+            };
+            const auto cache_new_depth = [&](double timestamp_s) {
+                if (!new_depth_mm.empty()) {
+                    last_depth_mm_ = new_depth_mm.clone();
+                    last_depth_timestamp_s_ = timestamp_s;
+                }
+            };
 
             auto color_frame = aligned_frames->getFrame(OB_FRAME_COLOR);
             if (!color_frame) {
+                cache_new_depth(mapped_depth_timestamp_s());
                 continue;
             }
 
             frame->color_bgr = color_frame_to_bgr(color_frame);
             if (frame->color_bgr.empty()) {
+                cache_new_depth(mapped_depth_timestamp_s());
                 continue;
             }
 
-            frame->timestamp_s = frame_timestamp_s(color_frame);
+            frame->sequence = next_sequence_++;
+            frame->timestamp_s = map_system_timestamp_us(
+                frame_system_timestamp_us(color_frame),
+                receive_time_s,
+                &frame->timestamp_reliable);
             frame->depth_mm.release();
             frame->depth_timestamp_s = 0.0;
             frame->depth_reused = false;
             frame->depth_age_s = 0.0;
 
             if (!new_depth_mm.empty()) {
+                const double new_depth_timestamp_s =
+                    mapped_depth_timestamp_s();
+                cache_new_depth(new_depth_timestamp_s);
                 frame->depth_mm = std::move(new_depth_mm);
                 frame->depth_timestamp_s = new_depth_timestamp_s;
                 frame->depth_age_s = std::max(0.0, frame->timestamp_s - frame->depth_timestamp_s);

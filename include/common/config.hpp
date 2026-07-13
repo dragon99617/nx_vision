@@ -40,6 +40,7 @@ struct SerialConfig {
     bool enabled = false;
     bool dry_run = true;
     int angle_scale_cdeg = 100;
+    std::string protocol = "v2";
 };
 
 struct DebugViewConfig {

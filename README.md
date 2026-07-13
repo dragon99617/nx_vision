@@ -90,16 +90,15 @@ ctest --test-dir build --output-on-failure
 
 ## Gimbal Protocol
 
-The runtime sends relative angle error to the gimbal:
+The default runtime packet carries relative angle errors plus frame timing:
 
 ```text
-A,yaw_cdeg,pitch_cdeg,dist_mm,valid\n
+V2,seq,age_us,yaw_cdeg,pitch_cdeg,dist_mm,depth_age_ms,flags,crc16\n
 ```
 
-- `yaw_cdeg`: relative yaw angle error in `0.01 deg`.
-- `pitch_cdeg`: relative pitch angle error in `0.01 deg`.
-- `dist_mm`: laser-origin-to-target distance estimate.
-- `valid`: `1` when a target is valid, otherwise `0`.
+Set `protocol: legacy_a` in `config/serial.yaml` to retain the original
+`A,yaw_cdeg,pitch_cdeg,dist_mm,valid` packet. See `docs/protocol.md` for the
+V2 flags and CRC definition.
 
 The STM32 side should apply the packet as:
 

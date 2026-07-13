@@ -94,7 +94,7 @@ PipelineResult AimPipeline::process_impl(const FrameBundle &frame,
     PipelineResult result;
     if (frame.color_bgr.empty()) {
         GimbalProtocol protocol(config_.serial);
-        result.serial_packet = protocol.make_invalid_packet();
+        result.serial_packet = protocol.make_packet(result.aim, result.depth, frame);
         return result;
     }
 
@@ -154,7 +154,7 @@ PipelineResult AimPipeline::process_impl(const FrameBundle &frame,
     result.valid = result.aim.valid;
 
     GimbalProtocol protocol(config_.serial);
-    result.serial_packet = protocol.make_packet(result.aim);
+    result.serial_packet = protocol.make_packet(result.aim, result.depth, frame);
 
     if (make_debug_panels) {
         result.panels["raw"] = frame.color_bgr;

@@ -1,5 +1,7 @@
 #include "tasks/task_base.hpp"
 
+#include "comm/gimbal_protocol.hpp"
+
 #include <cmath>
 #include <utility>
 
@@ -14,10 +16,10 @@ public:
     std::string name() const override { return "basic_trace_only"; }
     PipelineResult update(const FrameBundle &frame, bool make_debug_panels) override
     {
-        (void)frame;
         (void)make_debug_panels;
         PipelineResult result;
-        result.serial_packet = "A,0,0,0,0\n";
+        GimbalProtocol protocol(config_.serial);
+        result.serial_packet = protocol.make_packet(result.aim, result.depth, frame);
         return result;
     }
 };

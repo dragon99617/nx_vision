@@ -13,7 +13,10 @@ namespace nxv {
 struct FrameBundle {
     cv::Mat color_bgr;
     cv::Mat depth_mm;
+    uint32_t sequence = 0;
+    // RGB capture time mapped into the host steady_clock domain.
     double timestamp_s = 0.0;
+    bool timestamp_reliable = false;
     double depth_timestamp_s = 0.0;
     bool depth_reused = false;
     double depth_age_s = 0.0;

@@ -113,6 +113,7 @@ void load_serial(const std::string &dir, SerialConfig *config)
     read_value(fs, "enabled", &config->enabled);
     read_value(fs, "dry_run", &config->dry_run);
     read_value(fs, "angle_scale_cdeg", &config->angle_scale_cdeg);
+    read_value(fs, "protocol", &config->protocol);
 }
 
 void load_debug(const std::string &dir, DebugViewConfig *config)
