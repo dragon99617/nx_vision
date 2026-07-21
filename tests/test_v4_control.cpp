@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 
 namespace {
 
@@ -34,9 +35,11 @@ int main()
     assert(runtime_config.control.velocity_feedforward_enabled);
     assert(!runtime_config.control.torque_feedforward_enabled);
     assert(std::abs(runtime_config.control.yaw_mpc_position_weight - 250.0) < 1.0e-9);
-    assert(std::abs(runtime_config.control.pitch_mpc_position_weight - 250.0) < 1.0e-9);
-    assert(std::abs(runtime_config.control.mpc_velocity_weight - 2.0) < 1.0e-9);
-    assert(std::abs(runtime_config.control.mpc_acceleration_weight - 0.015) < 1.0e-12);
+    assert(std::abs(runtime_config.control.yaw_mpc_velocity_weight - 2.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.yaw_mpc_acceleration_weight - 0.015) < 1.0e-12);
+    assert(std::abs(runtime_config.control.pitch_mpc_position_weight - 500.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.pitch_mpc_velocity_weight - 3.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.pitch_mpc_acceleration_weight - 0.005) < 1.0e-12);
     assert(std::abs(runtime_config.control.yaw_max_rate_rad_s - 60.0 * kPi / 180.0) <
            1.0e-9);
     assert(std::abs(runtime_config.control.pitch_max_rate_rad_s - 40.0 * kPi / 180.0) <
@@ -194,6 +197,12 @@ int main()
         const double position_weight = pitch
                                            ? runtime_config.control.pitch_mpc_position_weight
                                            : runtime_config.control.yaw_mpc_position_weight;
+        const double velocity_weight = pitch
+                                           ? runtime_config.control.pitch_mpc_velocity_weight
+                                           : runtime_config.control.yaw_mpc_velocity_weight;
+        const double acceleration_weight = pitch
+                                               ? runtime_config.control.pitch_mpc_acceleration_weight
+                                               : runtime_config.control.yaw_mpc_acceleration_weight;
         const double target_rate_limit = pitch
                                              ? runtime_config.control.pitch_target_rate_limit_rad_s
                                              : runtime_config.control.yaw_target_rate_limit_rad_s;
@@ -202,8 +211,8 @@ int main()
                                         max_jerk,
                                         false,
                                         position_weight,
-                                        runtime_config.control.mpc_velocity_weight,
-                                        runtime_config.control.mpc_acceleration_weight,
+                                        velocity_weight,
+                                        acceleration_weight,
                                         target_rate_limit,
                                         runtime_config.control.mpc_target_rate_filter_tau_s);
         tuned_mpc.reset(0.0);
@@ -223,20 +232,90 @@ int main()
                    max_jerk * 0.001 + 1.0e-6);
             previous_tuned_accel = tuned_reference.acceleration_rad_s2;
         }
-        assert(rise_time_s > 0.0 && rise_time_s <= 0.75);
-        assert(maximum_position <= 1.03 * step_target);
+        assert(rise_time_s > 0.0 && rise_time_s <= (pitch ? 0.50 : 0.75));
+        assert(maximum_position <= (pitch ? 1.005 : 1.03) * step_target);
         assert(std::abs(tuned_reference.position_rad - step_target) < 1.0e-3);
     };
     verify_tuned_axis(false);
     verify_tuned_axis(true);
+
+    // Verify the pitch tuning across direction and amplitude.  These are the
+    // same controller equations for every case, with no stop/step branches.
+    for (double target_deg : {-30.0, -10.0, -5.0, -1.0, 1.0, 5.0, 10.0, 30.0}) {
+        nxv::ReferenceMpcAxis pitch_mpc(runtime_config.control.pitch_max_rate_rad_s,
+                                        runtime_config.control.pitch_max_accel_rad_s2,
+                                        runtime_config.control.pitch_max_jerk_rad_s3,
+                                        false,
+                                        runtime_config.control.pitch_mpc_position_weight,
+                                        runtime_config.control.pitch_mpc_velocity_weight,
+                                        runtime_config.control.pitch_mpc_acceleration_weight,
+                                        runtime_config.control.pitch_target_rate_limit_rad_s,
+                                        runtime_config.control.mpc_target_rate_filter_tau_s);
+        pitch_mpc.reset(0.0);
+        const double target_rad = target_deg * kPi / 180.0;
+        double direction_peak = 0.0;
+        nxv::MpcReference reference;
+        for (int i = 0; i < 6000; ++i) {
+            reference = pitch_mpc.step(target_rad, 0.0);
+            direction_peak = std::max(direction_peak,
+                                      std::copysign(reference.position_rad, target_rad));
+        }
+        assert(direction_peak <= std::abs(target_rad) * 1.005 + 1.0e-6);
+        assert(std::abs(reference.position_rad - target_rad) < 1.0e-4);
+        assert(std::abs(reference.velocity_rad_s) < 1.0e-4);
+    }
+
+    nxv::ReferenceMpcAxis invalid_input_mpc(1.0, 2.0, 10.0, false);
+    const auto finite_reference = invalid_input_mpc.step(
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity(),
+        -1.0);
+    assert(std::isfinite(finite_reference.position_rad));
+    assert(std::isfinite(finite_reference.velocity_rad_s));
+    assert(std::isfinite(finite_reference.acceleration_rad_s2));
+
+    // A moving target that stops should produce one bounded braking transient,
+    // not a repeated oscillation around the final angle.
+    nxv::ReferenceMpcAxis stopping_pitch_mpc(
+        runtime_config.control.pitch_max_rate_rad_s,
+        runtime_config.control.pitch_max_accel_rad_s2,
+        runtime_config.control.pitch_max_jerk_rad_s3,
+        false,
+        runtime_config.control.pitch_mpc_position_weight,
+        runtime_config.control.pitch_mpc_velocity_weight,
+        runtime_config.control.pitch_mpc_acceleration_weight,
+        runtime_config.control.pitch_target_rate_limit_rad_s,
+        runtime_config.control.mpc_target_rate_filter_tau_s);
+    stopping_pitch_mpc.reset(0.0);
+    const double moving_rate = 10.0 * kPi / 180.0;
+    double maximum_after_stop = -1.0e9;
+    double minimum_after_stop = 1.0e9;
+    nxv::MpcReference stopping_reference;
+    for (int i = 0; i < 5000; ++i) {
+        const double time_s = static_cast<double>(i + 1) * 0.001;
+        const bool moving = time_s <= 1.0;
+        stopping_reference = stopping_pitch_mpc.step(
+            moving_rate * std::min(time_s, 1.0),
+            moving ? moving_rate : 0.0);
+        if (!moving) {
+            maximum_after_stop = std::max(maximum_after_stop,
+                                          stopping_reference.position_rad);
+            minimum_after_stop = std::min(minimum_after_stop,
+                                          stopping_reference.position_rad);
+        }
+    }
+    assert(maximum_after_stop <= moving_rate + 1.0 * kPi / 180.0);
+    assert(minimum_after_stop >= moving_rate - 0.1 * kPi / 180.0);
+    assert(std::abs(stopping_reference.position_rad - moving_rate) < 1.0e-4);
+    assert(std::abs(stopping_reference.velocity_rad_s) < 1.0e-4);
 
     nxv::ReferenceMpcAxis rate_spike_mpc(runtime_config.control.pitch_max_rate_rad_s,
                                          runtime_config.control.pitch_max_accel_rad_s2,
                                          runtime_config.control.pitch_max_jerk_rad_s3,
                                          false,
                                          runtime_config.control.pitch_mpc_position_weight,
-                                         runtime_config.control.mpc_velocity_weight,
-                                         runtime_config.control.mpc_acceleration_weight,
+                                         runtime_config.control.pitch_mpc_velocity_weight,
+                                         runtime_config.control.pitch_mpc_acceleration_weight,
                                          runtime_config.control.pitch_target_rate_limit_rad_s,
                                          runtime_config.control.mpc_target_rate_filter_tau_s);
     rate_spike_mpc.reset(0.0);

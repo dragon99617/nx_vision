@@ -9,12 +9,16 @@ yaw_max_accel_rad_s2: 4.188790205
 pitch_max_accel_rad_s2: 3.141592654
 yaw_max_jerk_rad_s3: 41.88790205
 pitch_max_jerk_rad_s3: 31.41592654
-# The first faster preset exceeded the measured lower-loop capability. Keep
-# yaw and pitch independent, with a conservative 60/40 deg/s speed ceiling.
+# Both axes use the same two-state [position, velocity] reference controller.
+# Keep the known-good yaw tuning unchanged.  Pitch uses a critically damped
+# weighting selected across small/large positive/negative steps; it is faster
+# without raising the pitch motion limits seen by the lower loop.
 yaw_mpc_position_weight: 250.0
-pitch_mpc_position_weight: 250.0
-mpc_velocity_weight: 2.0
-mpc_acceleration_weight: 0.015
+yaw_mpc_velocity_weight: 2.0
+pitch_mpc_position_weight: 500.0
+pitch_mpc_velocity_weight: 3.0
+yaw_mpc_acceleration_weight: 0.015
+pitch_mpc_acceleration_weight: 0.005
 # Kalman target-rate estimates can jump at a 60 Hz visual update. Limit and
 # filter that term before it enters the 1 kHz reference generator.
 yaw_target_rate_limit_rad_s: 0.523598776

@@ -64,9 +64,11 @@ struct ControlConfig {
     double yaw_max_jerk_rad_s3 = 41.88790204786391;
     double pitch_max_jerk_rad_s3 = 31.41592653589793;
     double yaw_mpc_position_weight = 250.0;
-    double pitch_mpc_position_weight = 250.0;
-    double mpc_velocity_weight = 2.0;
-    double mpc_acceleration_weight = 0.015;
+    double yaw_mpc_velocity_weight = 2.0;
+    double yaw_mpc_acceleration_weight = 0.015;
+    double pitch_mpc_position_weight = 500.0;
+    double pitch_mpc_velocity_weight = 3.0;
+    double pitch_mpc_acceleration_weight = 0.005;
     double yaw_target_rate_limit_rad_s = 0.5235987755982988;
     double pitch_target_rate_limit_rad_s = 0.3490658503988659;
     double mpc_target_rate_filter_tau_s = 0.08;

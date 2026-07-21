@@ -324,6 +324,9 @@ void ReferenceMpcAxis::reset(double position)
 
 MpcReference ReferenceMpcAxis::step(double target_position, double target_velocity, double dt)
 {
+    if (!std::isfinite(dt) || dt <= 0.0) dt = 0.001;
+    dt = std::clamp(dt, 0.0001, 0.01);
+    if (!std::isfinite(target_position)) target_position = initialized_ ? position_ : 0.0;
     if (!initialized_) reset(target_position);
     const double bounded_target_velocity = std::clamp(
         std::isfinite(target_velocity) ? target_velocity : 0.0,
@@ -363,8 +366,8 @@ WorldController::WorldController(RuntimeConfig config, GimbalLink *link)
                config_.control.yaw_max_jerk_rad_s3,
                true,
                config_.control.yaw_mpc_position_weight,
-               config_.control.mpc_velocity_weight,
-               config_.control.mpc_acceleration_weight,
+               config_.control.yaw_mpc_velocity_weight,
+               config_.control.yaw_mpc_acceleration_weight,
                config_.control.yaw_target_rate_limit_rad_s,
                config_.control.mpc_target_rate_filter_tau_s),
       pitch_mpc_(config_.control.pitch_max_rate_rad_s,
@@ -372,8 +375,8 @@ WorldController::WorldController(RuntimeConfig config, GimbalLink *link)
                  config_.control.pitch_max_jerk_rad_s3,
                  false,
                  config_.control.pitch_mpc_position_weight,
-                 config_.control.mpc_velocity_weight,
-                 config_.control.mpc_acceleration_weight,
+                 config_.control.pitch_mpc_velocity_weight,
+                 config_.control.pitch_mpc_acceleration_weight,
                  config_.control.pitch_target_rate_limit_rad_s,
                  config_.control.mpc_target_rate_filter_tau_s)
 {
