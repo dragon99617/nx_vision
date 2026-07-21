@@ -33,9 +33,14 @@ int main()
     assert(runtime_config.serial.protocol == "v4");
     assert(runtime_config.control.velocity_feedforward_enabled);
     assert(!runtime_config.control.torque_feedforward_enabled);
-    assert(std::abs(runtime_config.control.mpc_position_weight - 400.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.yaw_mpc_position_weight - 250.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.pitch_mpc_position_weight - 250.0) < 1.0e-9);
     assert(std::abs(runtime_config.control.mpc_velocity_weight - 2.0) < 1.0e-9);
-    assert(std::abs(runtime_config.control.mpc_acceleration_weight - 0.01) < 1.0e-12);
+    assert(std::abs(runtime_config.control.mpc_acceleration_weight - 0.015) < 1.0e-12);
+    assert(std::abs(runtime_config.control.yaw_max_rate_rad_s - 60.0 * kPi / 180.0) <
+           1.0e-9);
+    assert(std::abs(runtime_config.control.pitch_max_rate_rad_s - 40.0 * kPi / 180.0) <
+           1.0e-9);
     assert(std::abs(cv::determinant(cv::Mat(runtime_config.control.body_from_camera)) - 1.0) <
            1.0e-9);
     static constexpr char crc_text[] = "123456789";
@@ -178,31 +183,68 @@ int main()
     assert(std::abs(std::remainder(wrapped_reference.position_rad -
                                    (kPi - 0.01), 2.0 * kPi)) < 0.001);
 
-    nxv::ReferenceMpcAxis tuned_mpc(runtime_config.control.yaw_max_rate_rad_s,
-                                    runtime_config.control.max_accel_rad_s2,
-                                    runtime_config.control.max_jerk_rad_s3,
-                                    false,
-                                    runtime_config.control.mpc_position_weight,
-                                    runtime_config.control.mpc_velocity_weight,
-                                    runtime_config.control.mpc_acceleration_weight);
-    tuned_mpc.reset(0.0);
     const double step_target = 10.0 * kPi / 180.0;
-    double maximum_position = 0.0;
-    double rise_time_s = -1.0;
-    nxv::MpcReference tuned_reference;
-    for (int i = 0; i < 2000; ++i) {
-        tuned_reference = tuned_mpc.step(step_target, 0.0);
-        maximum_position = std::max(maximum_position, tuned_reference.position_rad);
-        if (rise_time_s < 0.0 && tuned_reference.position_rad >= 0.9 * step_target) {
-            rise_time_s = static_cast<double>(i + 1) * 0.001;
+    const auto verify_tuned_axis = [&](bool pitch) {
+        const double max_rate = pitch ? runtime_config.control.pitch_max_rate_rad_s
+                                      : runtime_config.control.yaw_max_rate_rad_s;
+        const double max_accel = pitch ? runtime_config.control.pitch_max_accel_rad_s2
+                                       : runtime_config.control.yaw_max_accel_rad_s2;
+        const double max_jerk = pitch ? runtime_config.control.pitch_max_jerk_rad_s3
+                                      : runtime_config.control.yaw_max_jerk_rad_s3;
+        const double position_weight = pitch
+                                           ? runtime_config.control.pitch_mpc_position_weight
+                                           : runtime_config.control.yaw_mpc_position_weight;
+        const double target_rate_limit = pitch
+                                             ? runtime_config.control.pitch_target_rate_limit_rad_s
+                                             : runtime_config.control.yaw_target_rate_limit_rad_s;
+        nxv::ReferenceMpcAxis tuned_mpc(max_rate,
+                                        max_accel,
+                                        max_jerk,
+                                        false,
+                                        position_weight,
+                                        runtime_config.control.mpc_velocity_weight,
+                                        runtime_config.control.mpc_acceleration_weight,
+                                        target_rate_limit,
+                                        runtime_config.control.mpc_target_rate_filter_tau_s);
+        tuned_mpc.reset(0.0);
+        double maximum_position = 0.0;
+        double rise_time_s = -1.0;
+        double previous_tuned_accel = 0.0;
+        nxv::MpcReference tuned_reference;
+        for (int i = 0; i < 2000; ++i) {
+            tuned_reference = tuned_mpc.step(step_target, 0.0);
+            maximum_position = std::max(maximum_position, tuned_reference.position_rad);
+            if (rise_time_s < 0.0 && tuned_reference.position_rad >= 0.9 * step_target) {
+                rise_time_s = static_cast<double>(i + 1) * 0.001;
+            }
+            assert(std::abs(tuned_reference.velocity_rad_s) <= max_rate + 1.0e-6);
+            assert(std::abs(tuned_reference.acceleration_rad_s2) <= max_accel + 1.0e-6);
+            assert(std::abs(tuned_reference.acceleration_rad_s2 - previous_tuned_accel) <=
+                   max_jerk * 0.001 + 1.0e-6);
+            previous_tuned_accel = tuned_reference.acceleration_rad_s2;
         }
-        assert(std::abs(tuned_reference.velocity_rad_s) <=
-               runtime_config.control.yaw_max_rate_rad_s + 1.0e-6);
-        assert(std::abs(tuned_reference.acceleration_rad_s2) <=
-               runtime_config.control.max_accel_rad_s2 + 1.0e-6);
+        assert(rise_time_s > 0.0 && rise_time_s <= 0.75);
+        assert(maximum_position <= 1.03 * step_target);
+        assert(std::abs(tuned_reference.position_rad - step_target) < 1.0e-3);
+    };
+    verify_tuned_axis(false);
+    verify_tuned_axis(true);
+
+    nxv::ReferenceMpcAxis rate_spike_mpc(runtime_config.control.pitch_max_rate_rad_s,
+                                         runtime_config.control.pitch_max_accel_rad_s2,
+                                         runtime_config.control.pitch_max_jerk_rad_s3,
+                                         false,
+                                         runtime_config.control.pitch_mpc_position_weight,
+                                         runtime_config.control.mpc_velocity_weight,
+                                         runtime_config.control.mpc_acceleration_weight,
+                                         runtime_config.control.pitch_target_rate_limit_rad_s,
+                                         runtime_config.control.mpc_target_rate_filter_tau_s);
+    rate_spike_mpc.reset(0.0);
+    double spike_max_position = 0.0;
+    for (int i = 0; i < 500; ++i) {
+        const auto reference = rate_spike_mpc.step(0.0, i < 17 ? 100.0 : 0.0);
+        spike_max_position = std::max(spike_max_position, std::abs(reference.position_rad));
     }
-    assert(rise_time_s > 0.0 && rise_time_s <= 0.55);
-    assert(maximum_position <= 1.03 * step_target);
-    assert(std::abs(tuned_reference.position_rad - step_target) < 1.0e-3);
+    assert(spike_max_position < 0.01);
     return 0;
 }

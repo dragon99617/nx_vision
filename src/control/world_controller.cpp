@@ -238,21 +238,30 @@ ReferenceMpcAxis::ReferenceMpcAxis(double max_rate,
                                    bool wrap,
                                    double position_weight,
                                    double velocity_weight,
-                                   double acceleration_weight)
+                                   double acceleration_weight,
+                                   double target_rate_limit,
+                                   double target_rate_filter_tau)
     : max_rate_(std::abs(max_rate)),
       max_accel_(std::abs(max_accel)),
       max_jerk_(std::abs(max_jerk)),
       wrap_(wrap),
       position_weight_(std::isfinite(position_weight) && position_weight > 0.0
                            ? position_weight
-                           : 400.0),
+                           : 250.0),
       velocity_weight_(std::isfinite(velocity_weight) && velocity_weight > 0.0
                            ? velocity_weight
                            : 2.0),
       acceleration_weight_(std::isfinite(acceleration_weight) &&
                                    acceleration_weight > 0.0
                                ? acceleration_weight
-                               : 0.01)
+                               : 0.015),
+      target_rate_limit_(std::isfinite(target_rate_limit) && target_rate_limit > 0.0
+                             ? std::min(std::abs(target_rate_limit), max_rate_)
+                             : max_rate_),
+      target_rate_filter_tau_(std::isfinite(target_rate_filter_tau) &&
+                                      target_rate_filter_tau >= 0.0
+                                  ? target_rate_filter_tau
+                                  : 0.08)
 {
     calculate_gain(0.001);
 }
@@ -310,14 +319,24 @@ void ReferenceMpcAxis::reset(double position)
     position_ = wrap_ ? wrap_pi(position) : position;
     velocity_ = 0.0;
     acceleration_ = 0.0;
+    filtered_target_velocity_ = 0.0;
 }
 
 MpcReference ReferenceMpcAxis::step(double target_position, double target_velocity, double dt)
 {
     if (!initialized_) reset(target_position);
+    const double bounded_target_velocity = std::clamp(
+        std::isfinite(target_velocity) ? target_velocity : 0.0,
+        -target_rate_limit_,
+        target_rate_limit_);
+    const double rate_filter_alpha = target_rate_filter_tau_ > 0.0
+                                         ? dt / (target_rate_filter_tau_ + dt)
+                                         : 1.0;
+    filtered_target_velocity_ += rate_filter_alpha *
+        (bounded_target_velocity - filtered_target_velocity_);
     double error_position = position_ - target_position;
     if (wrap_) error_position = wrap_pi(error_position);
-    const double error_velocity = velocity_ - target_velocity;
+    const double error_velocity = velocity_ - filtered_target_velocity_;
     double desired_accel = -(gain_position_ * error_position + gain_velocity_ * error_velocity);
     desired_accel = std::clamp(desired_accel, -max_accel_, max_accel_);
     const double max_delta = max_jerk_ * dt;
@@ -329,7 +348,7 @@ MpcReference ReferenceMpcAxis::step(double target_position, double target_veloci
     if (wrap_) position_ = wrap_pi(position_);
     if (std::abs(error_position) < 1.0e-6 && std::abs(error_velocity) < 1.0e-5) {
         position_ = wrap_ ? wrap_pi(target_position) : target_position;
-        velocity_ = target_velocity;
+        velocity_ = filtered_target_velocity_;
         acceleration_ = 0.0;
     }
     return {position_, velocity_, acceleration_};
@@ -340,19 +359,23 @@ WorldController::WorldController(RuntimeConfig config, GimbalLink *link)
       link_(link),
       filter_(config_.control),
       yaw_mpc_(config_.control.yaw_max_rate_rad_s,
-               config_.control.max_accel_rad_s2,
-               config_.control.max_jerk_rad_s3,
+               config_.control.yaw_max_accel_rad_s2,
+               config_.control.yaw_max_jerk_rad_s3,
                true,
-               config_.control.mpc_position_weight,
+               config_.control.yaw_mpc_position_weight,
                config_.control.mpc_velocity_weight,
-               config_.control.mpc_acceleration_weight),
+               config_.control.mpc_acceleration_weight,
+               config_.control.yaw_target_rate_limit_rad_s,
+               config_.control.mpc_target_rate_filter_tau_s),
       pitch_mpc_(config_.control.pitch_max_rate_rad_s,
-                 config_.control.max_accel_rad_s2,
-                 config_.control.max_jerk_rad_s3,
+                 config_.control.pitch_max_accel_rad_s2,
+                 config_.control.pitch_max_jerk_rad_s3,
                  false,
-                 config_.control.mpc_position_weight,
+                 config_.control.pitch_mpc_position_weight,
                  config_.control.mpc_velocity_weight,
-                 config_.control.mpc_acceleration_weight)
+                 config_.control.mpc_acceleration_weight,
+                 config_.control.pitch_target_rate_limit_rad_s,
+                 config_.control.mpc_target_rate_filter_tau_s)
 {
 }
 
@@ -586,12 +609,15 @@ std::string WorldController::status_text() const
         << " unc95_ms=" << (link_ ? link_->synchronization_uncertainty_s() * 1.0e3 : 0.0)
         << " drift_ppm=" << (link_ ? link_->clock_drift_ppm() : 0.0)
         << " valid=" << (state.valid ? 1 : 0)
+        << " lost=" << (state.target_lost ? 1 : 0)
         << " faults=0x" << std::hex << (link_ ? link_->last_fault_bits() : 0U)
         << std::dec;
     if (state.valid) {
         out << std::fixed << std::setprecision(3)
             << " world_deg=" << state.yaw_rad * 180.0 / kPi
             << "," << state.pitch_rad * 180.0 / kPi;
+    } else if (!state.failure_reason.empty()) {
+        out << " reason=" << state.failure_reason;
     }
     out << "\ncam q=" << vision.timestamp_quality
         << " err_ms=" << vision.camera_mapping_error_s * 1.0e3

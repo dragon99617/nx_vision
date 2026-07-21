@@ -3,15 +3,23 @@
 enabled: 1
 velocity_feedforward_enabled: 1
 torque_feedforward_enabled: 0
-yaw_max_rate_rad_s: 1.745329252
-pitch_max_rate_rad_s: 2.0
-max_accel_rad_s2: 6.283185307
-max_jerk_rad_s3: 62.83185307
-# Reference-MPC costs. This keeps the existing motion limits while reducing
-# the deterministic 10 deg step to about 0.47 s rise time and under 3% overshoot.
-mpc_position_weight: 400.0
+yaw_max_rate_rad_s: 1.047197551
+pitch_max_rate_rad_s: 0.698131701
+yaw_max_accel_rad_s2: 4.188790205
+pitch_max_accel_rad_s2: 3.141592654
+yaw_max_jerk_rad_s3: 41.88790205
+pitch_max_jerk_rad_s3: 31.41592654
+# The first faster preset exceeded the measured lower-loop capability. Keep
+# yaw and pitch independent, with a conservative 60/40 deg/s speed ceiling.
+yaw_mpc_position_weight: 250.0
+pitch_mpc_position_weight: 250.0
 mpc_velocity_weight: 2.0
-mpc_acceleration_weight: 0.01
+mpc_acceleration_weight: 0.015
+# Kalman target-rate estimates can jump at a 60 Hz visual update. Limit and
+# filter that term before it enters the 1 kHz reference generator.
+yaw_target_rate_limit_rad_s: 0.523598776
+pitch_target_rate_limit_rad_s: 0.349065850
+mpc_target_rate_filter_tau_s: 0.08
 target_predict_full_s: 0.20
 target_velocity_decay_end_s: 0.50
 target_hold_end_s: 1.0
