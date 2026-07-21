@@ -544,43 +544,89 @@ double OrbbecCamera::map_hardware_timestamp_us(uint64_t timestamp_us,
             camera_clock_valid_ = false;
         }
         camera_clock_points_.push_back({camera_s, anchor_steady_s});
-        while (camera_clock_points_.size() > 120U) camera_clock_points_.pop_front();
+        // A two-second window makes the fitted slope very sensitive to a
+        // millisecond of SDK/USB timestamp jitter.  Keep ten seconds so clock
+        // drift is observable without letting old data grow without bound.
+        while (camera_clock_points_.size() > 600U) camera_clock_points_.pop_front();
         if (camera_clock_points_.size() >= 4U) {
-            double mean_camera = 0.0;
-            double mean_steady = 0.0;
+            const auto fit = [this](const std::vector<bool> *selected,
+                                    double *slope,
+                                    double *intercept) {
+                double mean_camera = 0.0;
+                double mean_steady = 0.0;
+                std::size_t count = 0;
+                for (std::size_t i = 0; i < camera_clock_points_.size(); ++i) {
+                    if (selected != nullptr && !(*selected)[i]) continue;
+                    mean_camera += camera_clock_points_[i].camera_s;
+                    mean_steady += camera_clock_points_[i].steady_s;
+                    ++count;
+                }
+                if (count < 2U) return std::size_t {0};
+                mean_camera /= static_cast<double>(count);
+                mean_steady /= static_cast<double>(count);
+                double covariance = 0.0;
+                double variance = 0.0;
+                for (std::size_t i = 0; i < camera_clock_points_.size(); ++i) {
+                    if (selected != nullptr && !(*selected)[i]) continue;
+                    const double camera_delta = camera_clock_points_[i].camera_s - mean_camera;
+                    covariance += camera_delta *
+                                  (camera_clock_points_[i].steady_s - mean_steady);
+                    variance += camera_delta * camera_delta;
+                }
+                *slope = variance > 1.0e-12 ? covariance / variance : 1.0;
+                *intercept = mean_steady - *slope * mean_camera;
+                return count;
+            };
+
+            double initial_slope = 1.0;
+            double initial_intercept = 0.0;
+            (void)fit(nullptr, &initial_slope, &initial_intercept);
+            std::vector<double> residuals;
+            residuals.reserve(camera_clock_points_.size());
             for (const CameraClockPoint &point : camera_clock_points_) {
-                mean_camera += point.camera_s;
-                mean_steady += point.steady_s;
+                residuals.push_back(std::abs(point.steady_s -
+                    (initial_slope * point.camera_s + initial_intercept)));
             }
-            mean_camera /= static_cast<double>(camera_clock_points_.size());
-            mean_steady /= static_cast<double>(camera_clock_points_.size());
-            double covariance = 0.0;
-            double variance = 0.0;
-            for (const CameraClockPoint &point : camera_clock_points_) {
-                covariance += (point.camera_s - mean_camera) *
-                              (point.steady_s - mean_steady);
-                variance += (point.camera_s - mean_camera) *
-                            (point.camera_s - mean_camera);
+            std::vector<double> sorted = residuals;
+            const auto middle = sorted.begin() +
+                static_cast<std::ptrdiff_t>(sorted.size() / 2U);
+            std::nth_element(sorted.begin(), middle, sorted.end());
+            // Reject scheduling/USB outliers, while retaining at least the
+            // sub-millisecond spread needed by precise mode.
+            const double robust_limit = std::max(0.00025, 3.0 * *middle);
+            std::vector<bool> selected(camera_clock_points_.size(), false);
+            for (std::size_t i = 0; i < residuals.size(); ++i) {
+                selected[i] = residuals[i] <= robust_limit;
             }
-            const double slope = variance > 1.0e-12 ? covariance / variance : 1.0;
-            const double intercept = mean_steady - slope * mean_camera;
+            double slope = 1.0;
+            double intercept = 0.0;
+            const std::size_t used = fit(&selected, &slope, &intercept);
             double sum_squared = 0.0;
-            for (const CameraClockPoint &point : camera_clock_points_) {
+            for (std::size_t i = 0; i < camera_clock_points_.size(); ++i) {
+                if (!selected[i]) continue;
+                const CameraClockPoint &point = camera_clock_points_[i];
                 const double error = point.steady_s -
                     (slope * point.camera_s + intercept);
                 sum_squared += error * error;
             }
-            const double residual = std::sqrt(
-                sum_squared / static_cast<double>(camera_clock_points_.size()));
-            if (slope >= 0.999 && slope <= 1.001) {
+            const double residual = used > 0U
+                ? std::sqrt(sum_squared / static_cast<double>(used))
+                : 1.0;
+            // A short regression window plus host timestamp jitter can easily
+            // look like >1000 ppm.  The affine map compensates stable drift;
+            // the residual, not a narrow slope gate, determines precision.
+            const bool candidate_valid = used >= 8U &&
+                slope >= 0.98 && slope <= 1.02 &&
+                residual <= app_config_.camera_mapping_max_residual_us * 1.0e-6;
+            if (candidate_valid) {
                 camera_clock_slope_ = slope;
                 camera_clock_intercept_ = intercept;
                 camera_clock_residual_s_ = residual;
-                camera_clock_valid_ = camera_clock_points_.size() >= 8U &&
-                    residual <= app_config_.camera_mapping_max_residual_us * 1.0e-6;
-            } else {
-                camera_clock_valid_ = false;
+                camera_clock_valid_ = true;
             }
+            // Keep the last good affine map through transient timestamp
+            // outliers. A real device-clock reset is handled above by clearing
+            // the history and invalidating the map.
         }
     }
     const double mapped = camera_clock_points_.size() >= 4U

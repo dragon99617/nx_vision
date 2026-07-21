@@ -100,6 +100,25 @@ public:
     std::string status_text() const;
 
 private:
+    struct VisionDiagnostics {
+        uint64_t accepted_count = 0;
+        uint64_t rejected_count = 0;
+        std::string last_status = "none";
+        int timestamp_quality = 0;
+        bool aim_valid = false;
+        bool measurement_valid = false;
+        double camera_mapping_error_s = 0.0;
+        double exposure_age_s = 0.0;
+        double attitude_error_s = 0.0;
+        double camera_yaw_deg = 0.0;
+        double camera_pitch_deg = 0.0;
+        double telemetry_yaw_deg = 0.0;
+        double quaternion_forward_yaw_deg = 0.0;
+        double measured_world_yaw_deg = 0.0;
+        double measured_world_pitch_deg = 0.0;
+        double continuous_world_yaw_deg = 0.0;
+    };
+
     static double steady_now_s();
     void control_loop();
     double feedforward_torque(bool pitch, const MpcReference &reference) const;
@@ -115,6 +134,8 @@ private:
     std::thread thread_;
     mutable std::mutex status_mutex_;
     WorldAimResult latest_target_;
+    mutable std::mutex vision_diag_mutex_;
+    VisionDiagnostics vision_diag_;
     uint64_t sent_count_ = 0;
     uint64_t invalid_count_ = 0;
 };

@@ -363,24 +363,84 @@ void WorldController::stop()
 
 void WorldController::submit_vision(const FrameBundle &frame, const PipelineResult &result)
 {
-    if (!result.aim.valid || link_ == nullptr || !link_->synchronized()) return;
     const double exposure_s = frame.exposure_midpoint_s > 0.0
                                   ? frame.exposure_midpoint_s
                                   : frame.timestamp_s;
+    const auto record = [&](const char *status,
+                            bool accepted,
+                            double attitude_error_s,
+                            const AttitudeSample *attitude,
+                            const double *world_yaw,
+                            const double *world_pitch) {
+        std::lock_guard<std::mutex> lock(vision_diag_mutex_);
+        vision_diag_.last_status = status;
+        vision_diag_.timestamp_quality = static_cast<int>(frame.timestamp_quality);
+        vision_diag_.aim_valid = result.aim.valid;
+        vision_diag_.camera_mapping_error_s = frame.camera_mapping_error_s;
+        vision_diag_.exposure_age_s = steady_now_s() - exposure_s;
+        vision_diag_.attitude_error_s = attitude_error_s;
+        vision_diag_.camera_yaw_deg = result.aim.yaw_delta_deg;
+        vision_diag_.camera_pitch_deg = result.aim.pitch_delta_deg;
+        if (attitude != nullptr) {
+            vision_diag_.telemetry_yaw_deg = attitude->yaw_rad * 180.0 / kPi;
+            const cv::Vec3d forward = rotate_body_to_world(attitude->quaternion,
+                                                            cv::Vec3d(0.0, 0.0, 1.0));
+            vision_diag_.quaternion_forward_yaw_deg =
+                std::atan2(forward[0], forward[2]) * 180.0 / kPi;
+        }
+        if (world_yaw != nullptr && world_pitch != nullptr) {
+            const double measured_yaw_deg = *world_yaw * 180.0 / kPi;
+            if (vision_diag_.measurement_valid) {
+                vision_diag_.continuous_world_yaw_deg += std::remainder(
+                    measured_yaw_deg - vision_diag_.measured_world_yaw_deg, 360.0);
+            } else {
+                vision_diag_.continuous_world_yaw_deg = measured_yaw_deg;
+                vision_diag_.measurement_valid = true;
+            }
+            vision_diag_.measured_world_yaw_deg = measured_yaw_deg;
+            vision_diag_.measured_world_pitch_deg = *world_pitch * 180.0 / kPi;
+        }
+        if (accepted) ++vision_diag_.accepted_count;
+        else ++vision_diag_.rejected_count;
+    };
+
+    if (!result.aim.valid) {
+        record("aim", false, 0.0, nullptr, nullptr, nullptr);
+        return;
+    }
+    if (link_ == nullptr || !link_->synchronized()) {
+        record("sync", false, 0.0, nullptr, nullptr, nullptr);
+        return;
+    }
     if (config_.app.require_precise_timestamps &&
-        frame.timestamp_quality < TimestampQuality::ExposureMidpoint) return;
-    if (config_.app.require_precise_timestamps && !link_->precise_timing()) return;
+        frame.timestamp_quality < TimestampQuality::ExposureMidpoint) {
+        record("cam_time", false, 0.0, nullptr, nullptr, nullptr);
+        return;
+    }
+    if (config_.app.require_precise_timestamps && !link_->precise_timing()) {
+        record("mcu_time", false, 0.0, nullptr, nullptr, nullptr);
+        return;
+    }
     AttitudeSample attitude;
     double time_error_s = 0.0;
-    if (!link_->attitude_at_host_time(exposure_s, &attitude, &time_error_s) ||
-        (attitude.flags & v4::CalibrationValid) == 0U) return;
+    if (!link_->attitude_at_host_time(exposure_s, &attitude, &time_error_s)) {
+        record("history", false, time_error_s, nullptr, nullptr, nullptr);
+        return;
+    }
+    if ((attitude.flags & v4::CalibrationValid) == 0U) {
+        record("imu_cal", false, time_error_s, &attitude, nullptr, nullptr);
+        return;
+    }
     double yaw = 0.0;
     double pitch = 0.0;
     if (!camera_aim_to_world(result.aim,
                              attitude.quaternion,
                              config_.control.body_from_camera,
                              &yaw,
-                             &pitch)) return;
+                             &pitch)) {
+        record("transform", false, time_error_s, &attitude, nullptr, nullptr);
+        return;
+    }
     const double quality = std::clamp(result.rectangle.score / 150.0, 0.2, 1.0);
     double measurement_std = (0.15 * kPi / 180.0) / quality;
     measurement_std *= std::clamp(1.0 + result.pose.reprojection_error_px / 2.0,
@@ -398,6 +458,9 @@ void WorldController::submit_vision(const FrameBundle &frame, const PipelineResu
         last_world_measurement_.yaw_rad = yaw;
         last_world_measurement_.pitch_rad = pitch;
         last_world_measurement_.attitude_error_s = time_error_s;
+        record("accepted", true, time_error_s, &attitude, &yaw, &pitch);
+    } else {
+        record("kf_gate", false, time_error_s, &attitude, &yaw, &pitch);
     }
 }
 
@@ -487,6 +550,11 @@ WorldAimResult WorldController::latest_world_target() const
 std::string WorldController::status_text() const
 {
     const WorldAimResult state = latest_world_target();
+    VisionDiagnostics vision;
+    {
+        std::lock_guard<std::mutex> lock(vision_diag_mutex_);
+        vision = vision_diag_;
+    }
     std::ostringstream out;
     out << "V4 hs=" << (link_ && link_->handshake_complete() ? 1 : 0)
         << " sync=" << (link_ && link_->synchronized() ? 1 : 0)
@@ -505,6 +573,21 @@ std::string WorldController::status_text() const
         out << std::fixed << std::setprecision(3)
             << " world_deg=" << state.yaw_rad * 180.0 / kPi
             << "," << state.pitch_rad * 180.0 / kPi;
+    }
+    out << "\ncam q=" << vision.timestamp_quality
+        << " err_ms=" << vision.camera_mapping_error_s * 1.0e3
+        << " age_ms=" << vision.exposure_age_s * 1.0e3
+        << " aim=" << (vision.aim_valid ? 1 : 0)
+        << " vision=" << vision.last_status
+        << " ok/rej=" << vision.accepted_count << "/" << vision.rejected_count;
+    if (vision.measurement_valid) {
+        out << "\naim_deg=" << vision.camera_yaw_deg << "," << vision.camera_pitch_deg
+            << " imu_yaw=" << vision.telemetry_yaw_deg
+            << " q_yaw=" << vision.quaternion_forward_yaw_deg
+            << " raw_world=" << vision.measured_world_yaw_deg
+            << "," << vision.measured_world_pitch_deg
+            << " cont_yaw=" << vision.continuous_world_yaw_deg
+            << " att_err_ms=" << vision.attitude_error_s * 1.0e3;
     }
     return out.str();
 }
