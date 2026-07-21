@@ -33,10 +33,11 @@ int main()
     assert(runtime_config.serial.protocol == "v4");
     assert(runtime_config.control.velocity_feedforward_enabled);
     assert(!runtime_config.control.torque_feedforward_enabled);
-    assert(std::abs(runtime_config.control.yaw_mpc_position_weight - 250.0) < 1.0e-9);
-    assert(std::abs(runtime_config.control.pitch_mpc_position_weight - 250.0) < 1.0e-9);
-    assert(std::abs(runtime_config.control.mpc_velocity_weight - 2.0) < 1.0e-9);
-    assert(std::abs(runtime_config.control.mpc_acceleration_weight - 0.015) < 1.0e-12);
+    assert(std::abs(runtime_config.control.yaw_mpc_position_weight - 1000.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.pitch_mpc_position_weight - 1000.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.mpc_velocity_weight - 20.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.mpc_acceleration_weight - 1.0) < 1.0e-12);
+    assert(std::abs(runtime_config.control.mpc_jerk_weight - 0.001) < 1.0e-12);
     assert(std::abs(runtime_config.control.yaw_max_rate_rad_s - 60.0 * kPi / 180.0) <
            1.0e-9);
     assert(std::abs(runtime_config.control.pitch_max_rate_rad_s - 40.0 * kPi / 180.0) <
@@ -204,6 +205,7 @@ int main()
                                         position_weight,
                                         runtime_config.control.mpc_velocity_weight,
                                         runtime_config.control.mpc_acceleration_weight,
+                                        runtime_config.control.mpc_jerk_weight,
                                         target_rate_limit,
                                         runtime_config.control.mpc_target_rate_filter_tau_s);
         tuned_mpc.reset(0.0);
@@ -237,6 +239,7 @@ int main()
                                          runtime_config.control.pitch_mpc_position_weight,
                                          runtime_config.control.mpc_velocity_weight,
                                          runtime_config.control.mpc_acceleration_weight,
+                                         runtime_config.control.mpc_jerk_weight,
                                          runtime_config.control.pitch_target_rate_limit_rad_s,
                                          runtime_config.control.mpc_target_rate_filter_tau_s);
     rate_spike_mpc.reset(0.0);
@@ -246,5 +249,34 @@ int main()
         spike_max_position = std::max(spike_max_position, std::abs(reference.position_rad));
     }
     assert(spike_max_position < 0.01);
+
+    nxv::ReferenceMpcAxis moving_target_mpc(
+        runtime_config.control.pitch_max_rate_rad_s,
+        runtime_config.control.pitch_max_accel_rad_s2,
+        runtime_config.control.pitch_max_jerk_rad_s3,
+        false,
+        runtime_config.control.pitch_mpc_position_weight,
+        runtime_config.control.mpc_velocity_weight,
+        runtime_config.control.mpc_acceleration_weight,
+        runtime_config.control.mpc_jerk_weight,
+        runtime_config.control.pitch_target_rate_limit_rad_s,
+        runtime_config.control.mpc_target_rate_filter_tau_s);
+    moving_target_mpc.reset(0.0);
+    const double moving_rate = 30.0 * kPi / 180.0;
+    const double stopped_position = moving_rate;
+    double maximum_after_stop = -1.0e9;
+    nxv::MpcReference moving_reference;
+    for (int i = 0; i < 6000; ++i) {
+        const double time_s = static_cast<double>(i) * 0.001;
+        const bool moving = time_s < 1.0;
+        moving_reference = moving_target_mpc.step(moving ? moving_rate * time_s
+                                                         : stopped_position,
+                                                   moving ? moving_rate : 0.0);
+        if (!moving) maximum_after_stop = std::max(maximum_after_stop,
+                                                   moving_reference.position_rad);
+    }
+    assert(maximum_after_stop <= stopped_position + 1.5 * kPi / 180.0);
+    assert(std::abs(moving_reference.position_rad - stopped_position) < 0.05 * kPi / 180.0);
+    assert(std::abs(moving_reference.velocity_rad_s) < 0.05 * kPi / 180.0);
     return 0;
 }

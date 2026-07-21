@@ -69,11 +69,12 @@ public:
                      double max_accel_rad_s2,
                      double max_jerk_rad_s3,
                      bool wrap_angle,
-                     double position_weight = 250.0,
-                     double velocity_weight = 2.0,
-                     double acceleration_weight = 0.015,
+                     double position_weight = 1000.0,
+                     double velocity_weight = 20.0,
+                     double acceleration_weight = 1.0,
+                     double jerk_weight = 0.001,
                      double target_rate_limit_rad_s = 1.0,
-                     double target_rate_filter_tau_s = 0.08);
+                     double target_rate_filter_tau_s = 0.04);
     void reset(double position_rad);
     MpcReference step(double target_position_rad, double target_velocity_rad_s, double dt_s = 0.001);
     bool initialized() const { return initialized_; }
@@ -89,6 +90,7 @@ private:
     double position_weight_;
     double velocity_weight_;
     double acceleration_weight_;
+    double jerk_weight_;
     double target_rate_limit_;
     double target_rate_filter_tau_;
     bool initialized_ = false;
@@ -98,6 +100,7 @@ private:
     double filtered_target_velocity_ = 0.0;
     double gain_position_ = 0.0;
     double gain_velocity_ = 0.0;
+    double gain_acceleration_ = 0.0;
 };
 
 class WorldController {

@@ -239,6 +239,7 @@ ReferenceMpcAxis::ReferenceMpcAxis(double max_rate,
                                    double position_weight,
                                    double velocity_weight,
                                    double acceleration_weight,
+                                   double jerk_weight,
                                    double target_rate_limit,
                                    double target_rate_filter_tau)
     : max_rate_(std::abs(max_rate)),
@@ -247,21 +248,24 @@ ReferenceMpcAxis::ReferenceMpcAxis(double max_rate,
       wrap_(wrap),
       position_weight_(std::isfinite(position_weight) && position_weight > 0.0
                            ? position_weight
-                           : 250.0),
+                           : 1000.0),
       velocity_weight_(std::isfinite(velocity_weight) && velocity_weight > 0.0
                            ? velocity_weight
-                           : 2.0),
+                           : 20.0),
       acceleration_weight_(std::isfinite(acceleration_weight) &&
                                    acceleration_weight > 0.0
                                ? acceleration_weight
-                               : 0.015),
+                               : 1.0),
+      jerk_weight_(std::isfinite(jerk_weight) && jerk_weight > 0.0
+                       ? jerk_weight
+                       : 0.001),
       target_rate_limit_(std::isfinite(target_rate_limit) && target_rate_limit > 0.0
                              ? std::min(std::abs(target_rate_limit), max_rate_)
                              : max_rate_),
       target_rate_filter_tau_(std::isfinite(target_rate_filter_tau) &&
                                       target_rate_filter_tau >= 0.0
                                   ? target_rate_filter_tau
-                                  : 0.08)
+                                  : 0.04)
 {
     calculate_gain(0.001);
 }
@@ -273,44 +277,62 @@ double ReferenceMpcAxis::wrap_pi(double value)
 
 void ReferenceMpcAxis::calculate_gain(double dt)
 {
-    double p00 = 1000.0;
-    double p01 = 0.0;
-    double p10 = 0.0;
-    double p11 = 10.0;
-    const double q00 = position_weight_;
-    const double q11 = velocity_weight_;
-    const double r = acceleration_weight_;
-    for (int step = 0; step < 50; ++step) {
-        const double b0 = 0.5 * dt * dt;
-        const double b1 = dt;
-        const double pb0 = p00 * b0 + p01 * b1;
-        const double pb1 = p10 * b0 + p11 * b1;
-        const double s = r + b0 * pb0 + b1 * pb1;
-        const double ba0 = b0 * (p00 + p01 * 0.0) + b1 * (p10 + p11 * 0.0);
-        const double ba1 = b0 * (p00 * dt + p01) + b1 * (p10 * dt + p11);
-        gain_position_ = ba0 / s;
-        gain_velocity_ = ba1 / s;
+    /* The plant state is [position, velocity, acceleration] and the input is
+     * jerk.  The previous implementation optimized acceleration and then
+     * imposed a jerk limiter outside that model, which invalidated the
+     * predicted dynamics and caused ringing.  Iterate the fixed-size Riccati
+     * equation to obtain a stabilizing terminal cost/gain once at startup. */
+    const double dt2 = dt * dt;
+    const double a[3][3] = {
+        {1.0, dt, 0.5 * dt2},
+        {0.0, 1.0, dt},
+        {0.0, 0.0, 1.0},
+    };
+    const double b[3] = {dt2 * dt / 6.0, 0.5 * dt2, dt};
+    const double q[3] = {position_weight_, velocity_weight_, acceleration_weight_};
+    double p[3][3] = {
+        {q[0], 0.0, 0.0},
+        {0.0, q[1], 0.0},
+        {0.0, 0.0, q[2]},
+    };
+    double gain[3] = {};
 
-        const double a00 = 1.0;
-        const double a01 = dt;
-        const double a10 = 0.0;
-        const double a11 = 1.0;
-        const double ap00 = p00;
-        const double ap01 = p01;
-        const double ap10 = dt * p00 + p10;
-        const double ap11 = dt * p01 + p11;
-        const double ata00 = ap00;
-        const double ata01 = ap00 * dt + ap01;
-        const double ata10 = ap10;
-        const double ata11 = ap10 * dt + ap11;
-        const double k0 = gain_position_;
-        const double k1 = gain_velocity_;
-        p00 = q00 + ata00 - ba0 * k0;
-        p01 = ata01 - ba0 * k1;
-        p10 = ata10 - ba1 * k0;
-        p11 = q11 + ata11 - ba1 * k1;
-        (void)a00; (void)a01; (void)a10; (void)a11;
+    for (int iteration = 0; iteration < 1000; ++iteration) {
+        double pa[3][3] = {};
+        double pb[3] = {};
+        double at_pa[3][3] = {};
+        double at_pb[3] = {};
+        double next_p[3][3] = {};
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                for (int k = 0; k < 3; ++k) pa[row][col] += p[row][k] * a[k][col];
+            }
+            for (int k = 0; k < 3; ++k) pb[row] += p[row][k] * b[k];
+        }
+        double denominator = jerk_weight_;
+        for (int i = 0; i < 3; ++i) denominator += b[i] * pb[i];
+        for (int col = 0; col < 3; ++col) {
+            gain[col] = 0.0;
+            for (int i = 0; i < 3; ++i) gain[col] += b[i] * pa[i][col];
+            gain[col] /= denominator;
+        }
+        for (int row = 0; row < 3; ++row) {
+            for (int k = 0; k < 3; ++k) at_pb[row] += a[k][row] * pb[k];
+            for (int col = 0; col < 3; ++col) {
+                for (int k = 0; k < 3; ++k) {
+                    at_pa[row][col] += a[k][row] * pa[k][col];
+                }
+                next_p[row][col] = (row == col ? q[row] : 0.0) +
+                                   at_pa[row][col] - at_pb[row] * gain[col];
+            }
+        }
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) p[row][col] = next_p[row][col];
+        }
     }
+    gain_position_ = gain[0];
+    gain_velocity_ = gain[1];
+    gain_acceleration_ = gain[2];
 }
 
 void ReferenceMpcAxis::reset(double position)
@@ -325,6 +347,9 @@ void ReferenceMpcAxis::reset(double position)
 MpcReference ReferenceMpcAxis::step(double target_position, double target_velocity, double dt)
 {
     if (!initialized_) reset(target_position);
+    if (!std::isfinite(dt) || dt <= 0.0) dt = 0.001;
+    dt = std::clamp(dt, 0.0001, 0.01);
+    if (!std::isfinite(target_position)) target_position = position_;
     const double bounded_target_velocity = std::clamp(
         std::isfinite(target_velocity) ? target_velocity : 0.0,
         -target_rate_limit_,
@@ -337,16 +362,28 @@ MpcReference ReferenceMpcAxis::step(double target_position, double target_veloci
     double error_position = position_ - target_position;
     if (wrap_) error_position = wrap_pi(error_position);
     const double error_velocity = velocity_ - filtered_target_velocity_;
-    double desired_accel = -(gain_position_ * error_position + gain_velocity_ * error_velocity);
-    desired_accel = std::clamp(desired_accel, -max_accel_, max_accel_);
-    const double max_delta = max_jerk_ * dt;
-    acceleration_ += std::clamp(desired_accel - acceleration_, -max_delta, max_delta);
-    if ((velocity_ >= max_rate_ && acceleration_ > 0.0) ||
-        (velocity_ <= -max_rate_ && acceleration_ < 0.0)) acceleration_ = 0.0;
-    position_ += velocity_ * dt + 0.5 * acceleration_ * dt * dt;
-    velocity_ = std::clamp(velocity_ + acceleration_ * dt, -max_rate_, max_rate_);
+    double jerk = -(gain_position_ * error_position +
+                    gain_velocity_ * error_velocity +
+                    gain_acceleration_ * acceleration_);
+    jerk = std::clamp(jerk, -max_jerk_, max_jerk_);
+    const double previous_acceleration = acceleration_;
+    acceleration_ = std::clamp(previous_acceleration + jerk * dt,
+                               -max_accel_,
+                               max_accel_);
+    /* Use the jerk that is actually achievable after acceleration clipping so
+     * the integrated state and the published feedforward remain consistent. */
+    jerk = (acceleration_ - previous_acceleration) / dt;
+    const double dt2 = dt * dt;
+    position_ += velocity_ * dt + 0.5 * previous_acceleration * dt2 +
+                 jerk * dt2 * dt / 6.0;
+    velocity_ = std::clamp(velocity_ + previous_acceleration * dt +
+                               0.5 * jerk * dt2,
+                           -max_rate_,
+                           max_rate_);
     if (wrap_) position_ = wrap_pi(position_);
-    if (std::abs(error_position) < 1.0e-6 && std::abs(error_velocity) < 1.0e-5) {
+    if (std::abs(error_position) < 1.0e-6 &&
+        std::abs(error_velocity) < 1.0e-5 &&
+        std::abs(acceleration_) < 1.0e-4) {
         position_ = wrap_ ? wrap_pi(target_position) : target_position;
         velocity_ = filtered_target_velocity_;
         acceleration_ = 0.0;
@@ -365,6 +402,7 @@ WorldController::WorldController(RuntimeConfig config, GimbalLink *link)
                config_.control.yaw_mpc_position_weight,
                config_.control.mpc_velocity_weight,
                config_.control.mpc_acceleration_weight,
+               config_.control.mpc_jerk_weight,
                config_.control.yaw_target_rate_limit_rad_s,
                config_.control.mpc_target_rate_filter_tau_s),
       pitch_mpc_(config_.control.pitch_max_rate_rad_s,
@@ -374,6 +412,7 @@ WorldController::WorldController(RuntimeConfig config, GimbalLink *link)
                  config_.control.pitch_mpc_position_weight,
                  config_.control.mpc_velocity_weight,
                  config_.control.mpc_acceleration_weight,
+                 config_.control.mpc_jerk_weight,
                  config_.control.pitch_target_rate_limit_rad_s,
                  config_.control.mpc_target_rate_filter_tau_s)
 {

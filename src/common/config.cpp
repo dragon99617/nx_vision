@@ -142,6 +142,7 @@ void load_control(const std::string &dir, ControlConfig *config)
     read_value(fs, "pitch_mpc_position_weight", &config->pitch_mpc_position_weight);
     read_value(fs, "mpc_velocity_weight", &config->mpc_velocity_weight);
     read_value(fs, "mpc_acceleration_weight", &config->mpc_acceleration_weight);
+    read_value(fs, "mpc_jerk_weight", &config->mpc_jerk_weight);
     read_value(fs, "yaw_target_rate_limit_rad_s", &config->yaw_target_rate_limit_rad_s);
     read_value(fs, "pitch_target_rate_limit_rad_s", &config->pitch_target_rate_limit_rad_s);
     read_value(fs, "mpc_target_rate_filter_tau_s", &config->mpc_target_rate_filter_tau_s);

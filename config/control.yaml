@@ -9,17 +9,18 @@ yaw_max_accel_rad_s2: 4.188790205
 pitch_max_accel_rad_s2: 3.141592654
 yaw_max_jerk_rad_s3: 41.88790205
 pitch_max_jerk_rad_s3: 31.41592654
-# The first faster preset exceeded the measured lower-loop capability. Keep
-# yaw and pitch independent, with a conservative 60/40 deg/s speed ceiling.
-yaw_mpc_position_weight: 250.0
-pitch_mpc_position_weight: 250.0
-mpc_velocity_weight: 2.0
-mpc_acceleration_weight: 0.015
-# Kalman target-rate estimates can jump at a 60 Hz visual update. Limit and
-# filter that term before it enters the 1 kHz reference generator.
-yaw_target_rate_limit_rad_s: 0.523598776
-pitch_target_rate_limit_rad_s: 0.349065850
-mpc_target_rate_filter_tau_s: 0.08
+# Three-state reference MPC: [position, velocity, acceleration], controlled by
+# jerk. The model and the enforced motion limits therefore use the same input.
+yaw_mpc_position_weight: 1000.0
+pitch_mpc_position_weight: 1000.0
+mpc_velocity_weight: 20.0
+mpc_acceleration_weight: 1.0
+mpc_jerk_weight: 0.001
+# Generic conditioning for the Kalman velocity state; these are physical
+# plausibility limits rather than stop/reacquire special cases.
+yaw_target_rate_limit_rad_s: 0.349065850
+pitch_target_rate_limit_rad_s: 0.261799388
+mpc_target_rate_filter_tau_s: 0.04
 target_predict_full_s: 0.20
 target_velocity_decay_end_s: 0.50
 target_hold_end_s: 1.0
