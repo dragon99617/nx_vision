@@ -1,73 +1,64 @@
-# Gimbal Protocol
+# Gimbal protocol V4
 
-Select the wire format with `protocol` in `config/serial.yaml`:
+`config/serial.yaml` now selects `protocol: v4`. V2 and `legacy_a` remain
+explicit debug modes. After a V4 `HELLO/HELLO_ACK` exchange, the firmware locks
+to binary mode until reset.
 
-```yaml
-protocol: v2       # default
-# protocol: legacy_a
-```
+All integers are little-endian. Every frame is:
 
-Only one packet is sent for each RGB result.
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 2 | magic `0xA55A` |
+| 2 | 1 | version `4` |
+| 3 | 1 | message type |
+| 4 | 2 | payload length |
+| 6 | 4 | sequence |
+| 10 | N | payload |
+| 10+N | 4 | CRC32C over header and payload |
 
-## V2 packet
+CRC32C uses the reflected Castagnoli polynomial `0x82F63B78`, initial value
+`0xFFFFFFFF`, and final inversion.
 
-```text
-V2,seq,age_us,yaw_cdeg,pitch_cdeg,dist_mm,depth_age_ms,flags,crc16\n
-```
+## Messages
 
-- `seq`: RGB frame sequence as unsigned 32-bit decimal; wraparound is allowed.
-- `age_us`: RGB capture-to-packet age in microseconds, clamped to
-  `0..500000`.
-- `yaw_cdeg`, `pitch_cdeg`: relative angle errors in `0.01 deg`.
-- `dist_mm`: laser-origin-to-target distance estimate.
-- `depth_age_ms`: depth age relative to RGB, rounded and clamped to `0..1000`.
-- `flags`:
-  - bit 0: existing vision `valid`;
-  - bit 1: RGB timestamp is reliable;
-  - bit 2: this RGB frame received a new, non-reused depth frame;
-  - bit 3: the existing depth estimate is valid;
-  - bit 4: the depth frame was reused;
-  - bits 5..31: zero.
-- Invalid vision results retain the existing wire semantics: yaw, pitch and
-  distance are zero, and flags bit 0 is clear.
+- `HELLO` (1) and `HELLO_ACK` (2): 4-byte capability mask.
+- `SYNC_REQ` (3): host `steady_clock` transmit time in nanoseconds (`u64`).
+- `SYNC_RESP` (4): echoed host time (`u64`), MCU receive TIM2 time (`u32 us`),
+  and MCU transmit TIM2 time (`u32 us`).
+- `CONTROL_SETPOINT` (5): 28-byte payload; total frame size 42 bytes.
+- `ATTITUDE_STATE` (6): 50-byte payload; total frame size exactly 64 bytes.
+- `FAULT_STATUS` (7): MCU time, fault bit mask, and packed diagnostic detail;
+  it is emitted whenever IMU, calibration, CAN, or queue fault state changes.
 
-`crc16` is CRC-16/CCITT-FALSE:
+`CONTROL_SETPOINT` payload order:
 
-- polynomial `0x1021`;
-- initial value `0xFFFF`;
-- `refin=false`, `refout=false`;
-- `xorout=0x0000`;
-- input is the ASCII byte range beginning with `V2` and ending with the final
-  decimal digit of `flags`;
-- the comma after `flags`, CRC field and newline are excluded;
-- output is four uppercase hexadecimal digits.
+| Field | Wire unit |
+|---|---|
+| execution TIM2 time | `u32 us` |
+| yaw position, yaw velocity | `i32 urad`, `i32 urad/s` |
+| yaw torque feedforward | `i16 1e-4 N m` |
+| pitch position, pitch velocity | `i32 urad`, `i32 urad/s` |
+| pitch torque feedforward | `i16 1e-4 N m` |
+| flags, reserved | `u16`, `u16` |
 
-Example CRC input:
+Control flags are valid, target-lost, velocity-feedforward-enabled, and
+torque-feedforward-enabled in bits 0 through 3. Torque feedforward is disabled
+in both default configurations.
 
-```text
-V2,42,12345,125,-50,1000,5,15
-```
+`ATTITUDE_STATE` carries the actual IMU sample TIM2 time, body/camera-to-local-
+world quaternion in Q30 (`w,x,y,z`), gyro in `mrad/s`, absolute yaw/pitch and
+rates in `urad` units, last executed control sequence, IMU/control flags, and
+the current 32-point queue depth.
 
-Complete packet:
+The upper computer sends one planned point per millisecond with an adaptive
+4--10 ms execution lead. The lower computer executes by TIM2 time. A single
+missing 1 kHz point is interpolated. At 10 ms without an executable point it
+holds position and clears both feedforwards; at 20 ms it holds the current
+attitude and leaves visual tracking.
 
-```text
-V2,42,12345,125,-50,1000,5,15,4B91\n
-```
+## Legacy debug formats
 
-## Legacy A packet
-
-With `protocol: legacy_a`, the original packet remains byte-for-byte
-compatible:
-
-```text
-A,yaw_cdeg,pitch_cdeg,dist_mm,valid\n
-```
-
-The STM32 side should compute:
-
-```text
-yaw_target = current_yaw + yaw_delta
-pitch_target = current_pitch + pitch_delta
-```
-
-This replaces the old pixel PID outer loop.
+V2 remains `V2,seq,age_us,yaw_cdeg,pitch_cdeg,dist_mm,depth_age_ms,flags,crc16`.
+`legacy_a` remains `A,yaw_cdeg,pitch_cdeg,dist_mm,valid`. Their relative-angle
+world compensation remains available only for explicit debugging; production
+world conversion is performed by `nx_vision`.

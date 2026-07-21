@@ -1,6 +1,7 @@
 #include "camera/orbbec_camera.hpp"
-#include "comm/serial_port.hpp"
+#include "comm/gimbal_link.hpp"
 #include "common/app_context.hpp"
+#include "control/world_controller.hpp"
 #include "tasks/task_base.hpp"
 
 #include <chrono>
@@ -18,13 +19,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    nxv::SerialPort serial;
-    if (!serial.open(context.config.serial)) {
+    nxv::GimbalLink link;
+    if (!link.open(context.config.serial)) {
         std::cerr << "Failed to open serial\n";
         return 1;
     }
 
     std::unique_ptr<nxv::TaskBase> task = nxv::make_task(context.config.app.task, context.config);
+    nxv::WorldController world(context.config, &link);
+    world.start();
     std::cout << "Running task: " << task->name() << "\n";
 
     for (;;) {
@@ -34,6 +37,10 @@ int main(int argc, char **argv)
             continue;
         }
         nxv::PipelineResult result = task->update(frame, false);
-        serial.write_line(result.serial_packet);
+        if (link.is_v4()) {
+            world.submit_vision(frame, result);
+        } else {
+            link.write_legacy(result.serial_packet);
+        }
     }
 }

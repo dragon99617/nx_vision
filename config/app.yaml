@@ -9,3 +9,9 @@ depth_fps: 30
 allow_mixed_rgbd_fps: 1
 input_image: ""
 task: basic_static_aim
+color_exposure_fallback_us: 5000.0
+color_exposure_metadata_scale_us: 100.0
+sensor_timestamp_scale_us: 1.0
+camera_timestamp_phase_offset_us: 0.0
+camera_mapping_max_residual_us: 500.0
+require_precise_timestamps: 1

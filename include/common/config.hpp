@@ -16,6 +16,12 @@ struct AppConfig {
     bool allow_mixed_rgbd_fps = true;
     std::string input_image;
     std::string task = "basic_static_aim";
+    double color_exposure_fallback_us = 5000.0;
+    double color_exposure_metadata_scale_us = 100.0;
+    double sensor_timestamp_scale_us = 1.0;
+    double camera_timestamp_phase_offset_us = 0.0;
+    double camera_mapping_max_residual_us = 500.0;
+    bool require_precise_timestamps = true;
 };
 
 struct VisionParams {
@@ -41,6 +47,33 @@ struct SerialConfig {
     bool dry_run = true;
     int angle_scale_cdeg = 100;
     std::string protocol = "v2";
+    int v4_sync_hz = 10;
+    double v4_min_lead_ms = 4.0;
+    double v4_max_lead_ms = 10.0;
+};
+
+struct ControlConfig {
+    bool enabled = true;
+    bool velocity_feedforward_enabled = true;
+    bool torque_feedforward_enabled = false;
+    double yaw_max_rate_rad_s = 1.7453292519943295;
+    double pitch_max_rate_rad_s = 2.0;
+    double max_accel_rad_s2 = 6.283185307179586;
+    double max_jerk_rad_s3 = 62.83185307179586;
+    double target_predict_full_s = 0.20;
+    double target_velocity_decay_end_s = 0.50;
+    double target_hold_end_s = 1.0;
+    double yaw_inertia = 0.0;
+    double yaw_viscous = 0.0;
+    double yaw_coulomb = 0.0;
+    double pitch_inertia = 0.0;
+    double pitch_viscous = 0.0;
+    double pitch_coulomb = 0.0;
+    double pitch_gravity = 0.0;
+    double pitch_gravity_zero_rad = 0.0;
+    int realtime_priority = 30;
+    int cpu_affinity = -1;
+    cv::Matx33d body_from_camera = cv::Matx33d::eye();
 };
 
 struct DebugViewConfig {
@@ -71,6 +104,7 @@ struct RuntimeConfig {
     SerialConfig serial;
     DebugViewConfig debug;
     DepthConfig depth;
+    ControlConfig control;
 };
 
 RuntimeConfig load_config(const std::string &config_dir);

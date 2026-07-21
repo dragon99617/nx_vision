@@ -9,6 +9,13 @@
 
 namespace nxv {
 
+enum class TimestampQuality : uint8_t {
+    Unavailable = 0,
+    ArrivalFallback,
+    DeviceMapped,
+    ExposureMidpoint,
+};
+
 //输入帧数据
 struct FrameBundle {
     cv::Mat color_bgr;
@@ -17,6 +24,13 @@ struct FrameBundle {
     // RGB capture time mapped into the host steady_clock domain.
     double timestamp_s = 0.0;
     bool timestamp_reliable = false;
+    uint64_t hardware_timestamp_us = 0;
+    uint64_t sensor_timestamp_raw = 0;
+    double arrival_timestamp_s = 0.0;
+    double exposure_midpoint_s = 0.0;
+    double exposure_time_s = 0.0;
+    double camera_mapping_error_s = 0.0;
+    TimestampQuality timestamp_quality = TimestampQuality::Unavailable;
     double depth_timestamp_s = 0.0;
     bool depth_reused = false;
     double depth_age_s = 0.0;
@@ -76,6 +90,7 @@ struct PoseResult {
     cv::Matx33d rotation = cv::Matx33d::eye();
     cv::Point3d target_cam_mm = cv::Point3d(0.0, 0.0, 0.0);
     double distance_mm = 0.0;
+    double reprojection_error_px = 0.0;
 };
 
 //深度估计结果
@@ -101,6 +116,18 @@ struct AimResult {
     cv::Point3d laser_origin_cam_mm = cv::Point3d(0.0, 0.0, 0.0);
 };
 
+struct WorldAimResult {
+    bool valid = false;
+    bool target_lost = false;
+    double timestamp_s = 0.0;
+    double yaw_rad = 0.0;
+    double pitch_rad = 0.0;
+    double yaw_rate_rad_s = 0.0;
+    double pitch_rate_rad_s = 0.0;
+    double attitude_error_s = 0.0;
+    std::string failure_reason;
+};
+
 //整个处理流程的结果
 struct PipelineResult {
     bool valid = false;
@@ -109,6 +136,7 @@ struct PipelineResult {
     PoseResult pose;
     DepthEstimate depth;
     AimResult aim;
+    WorldAimResult world_aim;
     std::string serial_packet;
     std::map<std::string, cv::Mat> panels;
 };

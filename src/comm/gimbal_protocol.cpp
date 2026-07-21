@@ -60,6 +60,9 @@ std::string GimbalProtocol::make_packet(const AimResult &aim,
     if (config_.protocol == "legacy_a") {
         return make_legacy_packet(aim);
     }
+    if (config_.protocol == "v4") {
+        return {};
+    }
     if (generation_timestamp_s < 0.0) {
         generation_timestamp_s = steady_timestamp_s();
     }

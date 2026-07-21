@@ -30,9 +30,13 @@ endif()
 add_library(nx_vision_core
     src/camera/orbbec_camera.cpp
     src/comm/gimbal_protocol.cpp
+    src/comm/gimbal_link.cpp
     src/comm/serial_port.cpp
+    src/comm/time_sync.cpp
+    src/comm/v4_protocol.cpp
     src/common/app_context.cpp
     src/common/config.cpp
+    src/control/world_controller.cpp
     src/debug_view/overlay_drawer.cpp
     src/debug_view/panel_layout.cpp
     src/debug_view/visual_debugger.cpp
@@ -83,4 +87,8 @@ if(NXVISION_BUILD_TESTS)
     add_executable(test_depth_estimator tests/test_depth_estimator.cpp)
     target_link_libraries(test_depth_estimator PRIVATE nx_vision_core)
     add_test(NAME test_depth_estimator COMMAND test_depth_estimator)
+
+    add_executable(test_v4_control tests/test_v4_control.cpp)
+    target_link_libraries(test_v4_control PRIVATE nx_vision_core)
+    add_test(NAME test_v4_control COMMAND test_v4_control)
 endif()

@@ -1,6 +1,7 @@
 #include "camera/orbbec_camera.hpp"
-#include "comm/serial_port.hpp"
+#include "comm/gimbal_link.hpp"
 #include "common/app_context.hpp"
+#include "control/world_controller.hpp"
 #include "debug_view/visual_debugger.hpp"
 #include "tasks/task_base.hpp"
 
@@ -81,10 +82,12 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    nxv::SerialPort serial;
-    serial.open(context.config.serial);
+    nxv::GimbalLink link;
+    link.open(context.config.serial);
 
     std::unique_ptr<nxv::TaskBase> task = nxv::make_task(context.config.app.task, context.config);
+    nxv::WorldController world(context.config, &link);
+    world.start();
     nxv::VisualDebugger debugger(context.config.debug);
 
     std::cout << "Debug studio running task: " << task->name() << "\n";
@@ -109,7 +112,16 @@ int main(int argc, char **argv)
 
         nxv::PipelineResult result = task->update(frame, render_debug);
         const auto after_pipeline = Clock::now();
-        if (serial.write_line(result.serial_packet)) {
+        bool sent = false;
+        if (link.is_v4()) {
+            world.submit_vision(frame, result);
+            result.world_aim = world.latest_world_target();
+            result.serial_packet = world.status_text();
+            sent = true;
+        } else {
+            sent = link.write_legacy(result.serial_packet);
+        }
+        if (sent) {
             debugger.record_serial_update();
         }
         const auto after_serial = Clock::now();

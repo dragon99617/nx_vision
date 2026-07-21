@@ -304,6 +304,19 @@ uint64_t frame_system_timestamp_us(const std::shared_ptr<ob::Frame> &frame)
     }
     return frame->getSystemTimeStampUs();
 }
+
+uint64_t frame_hardware_timestamp_us(const std::shared_ptr<ob::Frame> &frame)
+{
+    return frame ? frame->getTimeStampUs() : 0;
+}
+
+uint64_t frame_metadata_u64(const std::shared_ptr<ob::Frame> &frame,
+                            OBFrameMetadataType type)
+{
+    if (!frame || !frame->hasMetadata(type)) return 0;
+    const int64_t value = frame->getMetadataValue(type);
+    return value > 0 ? static_cast<uint64_t>(value) : 0;
+}
 #endif
 
 }  // namespace
@@ -315,6 +328,11 @@ bool OrbbecCamera::open(const AppConfig &config)
     last_depth_timestamp_s_ = 0.0;
     system_to_steady_offset_s_ = 0.0;
     has_system_to_steady_offset_ = false;
+    camera_clock_points_.clear();
+    camera_clock_slope_ = 1.0;
+    camera_clock_intercept_ = 0.0;
+    camera_clock_residual_s_ = 1.0;
+    camera_clock_valid_ = false;
     next_sequence_ = 0;
 
     if (!config.input_image.empty()) {
@@ -509,10 +527,84 @@ double OrbbecCamera::map_system_timestamp_us(uint64_t timestamp_us,
     return camera_system_s + system_to_steady_offset_s_;
 }
 
+double OrbbecCamera::map_hardware_timestamp_us(uint64_t timestamp_us,
+                                               double anchor_steady_s,
+                                               bool anchor_reliable,
+                                               bool *reliable,
+                                               double *residual_s)
+{
+    if (reliable != nullptr) *reliable = false;
+    if (residual_s != nullptr) *residual_s = 1.0;
+    if (timestamp_us == 0u) return anchor_steady_s;
+    const double camera_s = static_cast<double>(timestamp_us) * 1.0e-6;
+    if (anchor_reliable) {
+        if (!camera_clock_points_.empty() &&
+            camera_s + 0.100 < camera_clock_points_.back().camera_s) {
+            camera_clock_points_.clear();
+            camera_clock_valid_ = false;
+        }
+        camera_clock_points_.push_back({camera_s, anchor_steady_s});
+        while (camera_clock_points_.size() > 120U) camera_clock_points_.pop_front();
+        if (camera_clock_points_.size() >= 4U) {
+            double mean_camera = 0.0;
+            double mean_steady = 0.0;
+            for (const CameraClockPoint &point : camera_clock_points_) {
+                mean_camera += point.camera_s;
+                mean_steady += point.steady_s;
+            }
+            mean_camera /= static_cast<double>(camera_clock_points_.size());
+            mean_steady /= static_cast<double>(camera_clock_points_.size());
+            double covariance = 0.0;
+            double variance = 0.0;
+            for (const CameraClockPoint &point : camera_clock_points_) {
+                covariance += (point.camera_s - mean_camera) *
+                              (point.steady_s - mean_steady);
+                variance += (point.camera_s - mean_camera) *
+                            (point.camera_s - mean_camera);
+            }
+            const double slope = variance > 1.0e-12 ? covariance / variance : 1.0;
+            const double intercept = mean_steady - slope * mean_camera;
+            double sum_squared = 0.0;
+            for (const CameraClockPoint &point : camera_clock_points_) {
+                const double error = point.steady_s -
+                    (slope * point.camera_s + intercept);
+                sum_squared += error * error;
+            }
+            const double residual = std::sqrt(
+                sum_squared / static_cast<double>(camera_clock_points_.size()));
+            if (slope >= 0.999 && slope <= 1.001) {
+                camera_clock_slope_ = slope;
+                camera_clock_intercept_ = intercept;
+                camera_clock_residual_s_ = residual;
+                camera_clock_valid_ = camera_clock_points_.size() >= 8U &&
+                    residual <= app_config_.camera_mapping_max_residual_us * 1.0e-6;
+            } else {
+                camera_clock_valid_ = false;
+            }
+        }
+    }
+    const double mapped = camera_clock_points_.size() >= 4U
+        ? camera_clock_slope_ * camera_s + camera_clock_intercept_
+        : anchor_steady_s;
+    if (reliable != nullptr) *reliable = camera_clock_valid_;
+    if (residual_s != nullptr) {
+        *residual_s = anchor_reliable
+            ? std::abs(anchor_steady_s - mapped)
+            : camera_clock_residual_s_;
+    }
+    return mapped;
+}
+
 void OrbbecCamera::assign_fallback_metadata(FrameBundle *frame)
 {
+    const double now_s = steady_timestamp_s();
     frame->sequence = next_sequence_++;
-    frame->timestamp_s = steady_timestamp_s();
+    frame->timestamp_s = now_s;
+    frame->arrival_timestamp_s = now_s;
+    frame->exposure_midpoint_s = now_s;
+    frame->exposure_time_s = app_config_.color_exposure_fallback_us * 1.0e-6;
+    frame->camera_mapping_error_s = 1.0;
+    frame->timestamp_quality = TimestampQuality::ArrivalFallback;
     frame->timestamp_reliable = false;
 }
 
@@ -568,10 +660,53 @@ bool OrbbecCamera::grab_orbbec(FrameBundle *frame)
             }
 
             frame->sequence = next_sequence_++;
-            frame->timestamp_s = map_system_timestamp_us(
+            frame->arrival_timestamp_s = receive_time_s;
+            frame->hardware_timestamp_us = frame_hardware_timestamp_us(color_frame);
+            frame->sensor_timestamp_raw = frame_metadata_u64(
+                color_frame, OB_FRAME_METADATA_TYPE_SENSOR_TIMESTAMP);
+            const uint64_t exposure_raw = frame_metadata_u64(
+                color_frame, OB_FRAME_METADATA_TYPE_EXPOSURE);
+            frame->exposure_time_s = exposure_raw > 0
+                ? static_cast<double>(exposure_raw) *
+                      app_config_.color_exposure_metadata_scale_us * 1.0e-6
+                : app_config_.color_exposure_fallback_us * 1.0e-6;
+            bool system_timestamp_reliable = false;
+            const double mapped_system_s = map_system_timestamp_us(
                 frame_system_timestamp_us(color_frame),
                 receive_time_s,
-                &frame->timestamp_reliable);
+                &system_timestamp_reliable);
+            const double mapped_frame_s = map_hardware_timestamp_us(
+                frame->hardware_timestamp_us,
+                mapped_system_s,
+                system_timestamp_reliable,
+                &frame->timestamp_reliable,
+                &frame->camera_mapping_error_s);
+            frame->timestamp_quality = frame->timestamp_reliable
+                ? TimestampQuality::DeviceMapped
+                : TimestampQuality::ArrivalFallback;
+            frame->exposure_midpoint_s = mapped_frame_s;
+            if (frame->timestamp_reliable &&
+                frame->sensor_timestamp_raw > 0 &&
+                frame->hardware_timestamp_us > 0) {
+                const double sensor_us = static_cast<double>(frame->sensor_timestamp_raw) *
+                    app_config_.sensor_timestamp_scale_us;
+                const double delta_s = (sensor_us -
+                    static_cast<double>(frame->hardware_timestamp_us)) * 1.0e-6;
+                if (std::abs(delta_s) <= 0.050) {
+                    frame->exposure_midpoint_s = mapped_frame_s + delta_s;
+                    frame->timestamp_quality = TimestampQuality::ExposureMidpoint;
+                }
+            }
+            if (frame->timestamp_quality != TimestampQuality::ExposureMidpoint &&
+                frame->timestamp_reliable) {
+                frame->exposure_midpoint_s = mapped_frame_s +
+                    0.5 * frame->exposure_time_s +
+                    app_config_.camera_timestamp_phase_offset_us * 1.0e-6;
+                if (exposure_raw > 0u) {
+                    frame->timestamp_quality = TimestampQuality::ExposureMidpoint;
+                }
+            }
+            frame->timestamp_s = frame->exposure_midpoint_s;
             frame->depth_mm.release();
             frame->depth_timestamp_s = 0.0;
             frame->depth_reused = false;

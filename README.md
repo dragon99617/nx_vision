@@ -1,8 +1,9 @@
 # nx_vision
 
 Orin NX vision stack for a self-aiming gimbal task. The project captures RGB
-frames, detects the target, estimates pose with PnP, compensates for the laser
-origin, and sends relative yaw/pitch angle errors to an STM32 gimbal controller.
+frames, detects the target, estimates pose with PnP, converts the exposure-time
+line of sight into a local world frame, and publishes a time-triggered 1 kHz
+reference to the STM32 gimbal controller.
 
 The first implementation is OpenCV based. The camera layer is isolated so native
 Orbbec SDK depth capture can be added later without rewriting the PnP, task,
@@ -14,7 +15,9 @@ serial, pipeline, or debug-view layers.
 - Target rectangle detection, preprocessing, tracking, and laser detection.
 - PnP pose solving and laser-origin compensation.
 - Multiple task modes for the basic and advanced requirements.
-- Serial packet generation for gimbal integration.
+- V4 CRC32C binary transport, four-timestamp clock synchronization, and 1 kHz
+  attitude history.
+- World-target Kalman filtering and constrained 1 kHz MPC reference generation.
 - Debug Studio views for raw frames, masks, contours, pose, and serial output.
 - YAML-based configuration for camera, target geometry, serial, tasks, and debug
   layout.
@@ -90,22 +93,10 @@ ctest --test-dir build --output-on-failure
 
 ## Gimbal Protocol
 
-The default runtime packet carries relative angle errors plus frame timing:
-
-```text
-V2,seq,age_us,yaw_cdeg,pitch_cdeg,dist_mm,depth_age_ms,flags,crc16\n
-```
-
-Set `protocol: legacy_a` in `config/serial.yaml` to retain the original
-`A,yaw_cdeg,pitch_cdeg,dist_mm,valid` packet. See `docs/protocol.md` for the
-V2 flags and CRC definition.
-
-The STM32 side should apply the packet as:
-
-```text
-yaw_target = current_yaw + yaw_delta
-pitch_target = current_pitch + pitch_delta
-```
+The default is the time-triggered binary V4 protocol. It sends 42-byte planned
+world-angle points at 1 kHz and receives 64-byte timestamped IMU states at
+1 kHz. V2 and `legacy_a` are retained as explicit debug modes. See
+`docs/protocol.md` for the exact layout and safety behaviour.
 
 ## Documentation
 

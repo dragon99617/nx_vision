@@ -5,4 +5,7 @@ baudrate: 115200
 enabled: 1
 dry_run: 0
 angle_scale_cdeg: 100
-protocol: v2
+protocol: v4
+v4_sync_hz: 10
+v4_min_lead_ms: 4.0
+v4_max_lead_ms: 10.0

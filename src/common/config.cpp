@@ -34,6 +34,12 @@ void load_app(const std::string &dir, AppConfig *config)
     read_value(fs, "allow_mixed_rgbd_fps", &config->allow_mixed_rgbd_fps);
     read_value(fs, "input_image", &config->input_image);
     read_value(fs, "task", &config->task);
+    read_value(fs, "color_exposure_fallback_us", &config->color_exposure_fallback_us);
+    read_value(fs, "color_exposure_metadata_scale_us", &config->color_exposure_metadata_scale_us);
+    read_value(fs, "sensor_timestamp_scale_us", &config->sensor_timestamp_scale_us);
+    read_value(fs, "camera_timestamp_phase_offset_us", &config->camera_timestamp_phase_offset_us);
+    read_value(fs, "camera_mapping_max_residual_us", &config->camera_mapping_max_residual_us);
+    read_value(fs, "require_precise_timestamps", &config->require_precise_timestamps);
 }
 
 void load_vision(const std::string &dir, VisionParams *config)
@@ -114,6 +120,47 @@ void load_serial(const std::string &dir, SerialConfig *config)
     read_value(fs, "dry_run", &config->dry_run);
     read_value(fs, "angle_scale_cdeg", &config->angle_scale_cdeg);
     read_value(fs, "protocol", &config->protocol);
+    read_value(fs, "v4_sync_hz", &config->v4_sync_hz);
+    read_value(fs, "v4_min_lead_ms", &config->v4_min_lead_ms);
+    read_value(fs, "v4_max_lead_ms", &config->v4_max_lead_ms);
+}
+
+void load_control(const std::string &dir, ControlConfig *config)
+{
+    cv::FileStorage fs(path_join(dir, "control.yaml"), cv::FileStorage::READ);
+    read_value(fs, "enabled", &config->enabled);
+    read_value(fs, "velocity_feedforward_enabled", &config->velocity_feedforward_enabled);
+    read_value(fs, "torque_feedforward_enabled", &config->torque_feedforward_enabled);
+    read_value(fs, "yaw_max_rate_rad_s", &config->yaw_max_rate_rad_s);
+    read_value(fs, "pitch_max_rate_rad_s", &config->pitch_max_rate_rad_s);
+    read_value(fs, "max_accel_rad_s2", &config->max_accel_rad_s2);
+    read_value(fs, "max_jerk_rad_s3", &config->max_jerk_rad_s3);
+    read_value(fs, "target_predict_full_s", &config->target_predict_full_s);
+    read_value(fs, "target_velocity_decay_end_s", &config->target_velocity_decay_end_s);
+    read_value(fs, "target_hold_end_s", &config->target_hold_end_s);
+    read_value(fs, "yaw_inertia", &config->yaw_inertia);
+    read_value(fs, "yaw_viscous", &config->yaw_viscous);
+    read_value(fs, "yaw_coulomb", &config->yaw_coulomb);
+    read_value(fs, "pitch_inertia", &config->pitch_inertia);
+    read_value(fs, "pitch_viscous", &config->pitch_viscous);
+    read_value(fs, "pitch_coulomb", &config->pitch_coulomb);
+    read_value(fs, "pitch_gravity", &config->pitch_gravity);
+    read_value(fs, "pitch_gravity_zero_rad", &config->pitch_gravity_zero_rad);
+    read_value(fs, "realtime_priority", &config->realtime_priority);
+    read_value(fs, "cpu_affinity", &config->cpu_affinity);
+
+    cv::Mat rotation;
+    if (fs.isOpened() && !fs["body_from_camera"].empty()) {
+        fs["body_from_camera"] >> rotation;
+        if (rotation.rows == 3 && rotation.cols == 3) {
+            rotation.convertTo(rotation, CV_64F);
+            for (int row = 0; row < 3; ++row) {
+                for (int col = 0; col < 3; ++col) {
+                    config->body_from_camera(row, col) = rotation.at<double>(row, col);
+                }
+            }
+        }
+    }
 }
 
 void load_debug(const std::string &dir, DebugViewConfig *config)
@@ -169,6 +216,7 @@ RuntimeConfig load_config(const std::string &config_dir)
     load_serial(config_dir, &config.serial);
     load_debug(config_dir, &config.debug);
     load_depth(config_dir, &config.depth);
+    load_control(config_dir, &config.control);
     return config;
 }
 

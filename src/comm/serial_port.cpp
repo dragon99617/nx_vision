@@ -161,6 +161,28 @@ bool SerialPort::write_line(const std::string &line)
 #endif
 }
 
+int SerialPort::read_available(void *data, std::size_t capacity)
+{
+    if (data == nullptr || capacity == 0 || !config_.enabled || config_.dry_run) {
+        return 0;
+    }
+#ifdef _WIN32
+    return -1;
+#else
+    if (fd_ < 0) {
+        return -1;
+    }
+    const ssize_t count = ::read(fd_, data, capacity);
+    if (count >= 0) {
+        return static_cast<int>(count);
+    }
+    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+        return 0;
+    }
+    return -1;
+#endif
+}
+
 void SerialPort::close()
 {
 #ifndef _WIN32

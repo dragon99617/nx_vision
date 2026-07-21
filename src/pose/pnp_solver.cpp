@@ -59,6 +59,22 @@ PoseResult PnpSolver::solve(const RectangleDetection &rect,
     result.rotation = rotation;
     result.target_cam_mm = cv::Point3d(tvec[0], tvec[1], tvec[2]);
     result.distance_mm = std::sqrt(tvec[0] * tvec[0] + tvec[1] * tvec[1] + tvec[2] * tvec[2]);
+    std::vector<cv::Point2f> projected;
+    cv::projectPoints(object_points,
+                      rvec,
+                      tvec,
+                      intrinsics.camera_matrix,
+                      intrinsics.dist_coeffs,
+                      projected);
+    double squared_error = 0.0;
+    for (std::size_t i = 0; i < projected.size(); ++i) {
+        const cv::Point2f error = projected[i] - rect.corners[i];
+        squared_error += static_cast<double>(error.dot(error));
+    }
+    if (!projected.empty()) {
+        result.reprojection_error_px =
+            std::sqrt(squared_error / static_cast<double>(projected.size()));
+    }
     return result;
 }
 

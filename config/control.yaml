@@ -1,0 +1,27 @@
+%YAML:1.0
+---
+enabled: 1
+velocity_feedforward_enabled: 1
+torque_feedforward_enabled: 0
+yaw_max_rate_rad_s: 1.745329252
+pitch_max_rate_rad_s: 2.0
+max_accel_rad_s2: 6.283185307
+max_jerk_rad_s3: 62.83185307
+target_predict_full_s: 0.20
+target_velocity_decay_end_s: 0.50
+target_hold_end_s: 1.0
+yaw_inertia: 0.0
+yaw_viscous: 0.0
+yaw_coulomb: 0.0
+pitch_inertia: 0.0
+pitch_viscous: 0.0
+pitch_coulomb: 0.0
+pitch_gravity: 0.0
+pitch_gravity_zero_rad: 0.0
+realtime_priority: 30
+cpu_affinity: -1
+body_from_camera: !!opencv-matrix
+  rows: 3
+  cols: 3
+  dt: d
+  data: [1., 0., 0., 0., 1., 0., 0., 0., 1.]
