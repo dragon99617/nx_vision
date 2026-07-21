@@ -161,6 +161,9 @@ void GimbalLink::receiver_loop()
     std::array<uint8_t, 512> bytes {};
     auto next_sync = Clock::now();
     auto next_hello = Clock::now();
+    const auto receiver_started = Clock::now();
+    bool no_downlink_warning_reported = false;
+    bool read_error_reported = false;
     const auto sync_period = std::chrono::microseconds(
         1'000'000 / std::max(1, config_.v4_sync_hz));
 
@@ -171,6 +174,9 @@ void GimbalLink::receiver_loop()
             for (const v4::Frame &frame : decoder_.push(bytes.data(), static_cast<std::size_t>(count))) {
                 handle_frame(frame, receive_ns);
             }
+        } else if (count < 0 && !read_error_reported) {
+            std::cerr << "[v4] serial read failed; check USB disconnect and device ownership\n";
+            read_error_reported = true;
         }
 
         const auto now = Clock::now();
@@ -183,6 +189,12 @@ void GimbalLink::receiver_loop()
             request.host_transmit_time_ns = steady_now_ns();
             write_bytes(v4::encode_sync_request(tx_sequence_.fetch_add(1), request));
             next_sync = now + sync_period;
+        }
+        if (!handshake_complete_ && !no_downlink_warning_reported &&
+            now - receiver_started > std::chrono::seconds(2)) {
+            std::cerr << "[v4] no downlink frames received for 2 s. Stop any other "
+                         "nx_runtime/nx_debug_studio process using the same USB device.\n";
+            no_downlink_warning_reported = true;
         }
         if (count <= 0) std::this_thread::sleep_for(std::chrono::microseconds(200));
     }

@@ -83,7 +83,10 @@ int main(int argc, char **argv)
     }
 
     nxv::GimbalLink link;
-    link.open(context.config.serial);
+    if (!link.open(context.config.serial)) {
+        std::cerr << "Failed to exclusively open gimbal serial device. Stop other nx_runtime/nx_debug_studio processes first.\n";
+        return 1;
+    }
 
     std::unique_ptr<nxv::TaskBase> task = nxv::make_task(context.config.app.task, context.config);
     nxv::WorldController world(context.config, &link);

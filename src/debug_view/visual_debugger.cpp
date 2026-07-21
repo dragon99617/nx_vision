@@ -11,8 +11,36 @@
 #include <map>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 namespace nxv {
+namespace {
+
+std::vector<std::string> wrap_text(const std::string &text,
+                                   int maximum_width,
+                                   double scale,
+                                   int thickness)
+{
+    std::istringstream words(text);
+    std::vector<std::string> lines;
+    std::string line;
+    std::string word;
+    while (words >> word) {
+        const std::string candidate = line.empty() ? word : line + " " + word;
+        if (!line.empty() &&
+            cv::getTextSize(candidate, cv::FONT_HERSHEY_SIMPLEX,
+                            scale, thickness, nullptr).width > maximum_width) {
+            lines.push_back(line);
+            line = word;
+        } else {
+            line = candidate;
+        }
+    }
+    if (!line.empty()) lines.push_back(line);
+    return lines;
+}
+
+}  // namespace
 
 VisualDebugger::VisualDebugger(DebugViewConfig config)
     : config_(std::move(config))
@@ -51,8 +79,21 @@ cv::Mat VisualDebugger::make_serial_panel(const std::string &serial_packet) cons
     fps_text << "Serial FPS: " << std::fixed << std::setprecision(1) << serial_fps_ << " Hz";
 
     cv::Mat serial_panel(config_.panel_height, config_.panel_width, CV_8UC3, cv::Scalar(15, 15, 15));
-    cv::putText(serial_panel, "Packet: " + packet, cv::Point(12, 48), cv::FONT_HERSHEY_SIMPLEX, 0.62, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
-    cv::putText(serial_panel, fps_text.str(), cv::Point(12, 84), cv::FONT_HERSHEY_SIMPLEX, 0.62, cv::Scalar(0, 220, 120), 2, cv::LINE_AA);
+    cv::putText(serial_panel, "Packet:", cv::Point(12, 42),
+                cv::FONT_HERSHEY_SIMPLEX, 0.56, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+    const auto lines = wrap_text(packet, config_.panel_width - 24, 0.48, 1);
+    int y = 68;
+    for (const std::string &line : lines) {
+        if (y > config_.panel_height - 42) break;
+        cv::putText(serial_panel, line, cv::Point(12, y),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.48,
+                    cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+        y += 23;
+    }
+    cv::putText(serial_panel, fps_text.str(),
+                cv::Point(12, config_.panel_height - 14),
+                cv::FONT_HERSHEY_SIMPLEX, 0.52,
+                cv::Scalar(0, 220, 120), 1, cv::LINE_AA);
     return serial_panel;
 }
 

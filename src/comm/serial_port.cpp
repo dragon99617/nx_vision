@@ -11,6 +11,7 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/file.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -89,6 +90,12 @@ bool SerialPort::open(const SerialConfig &config)
     fd_ = ::open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd_ < 0) {
         perror("[serial] open");
+        return false;
+    }
+    if (::flock(fd_, LOCK_EX | LOCK_NB) != 0) {
+        std::cerr << "[serial] device is already owned by another nx_vision process: "
+                  << device << "\n";
+        close();
         return false;
     }
     config_.device = device;
