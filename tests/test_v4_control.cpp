@@ -89,6 +89,19 @@ int main()
     assert(std::llabs(static_cast<int64_t>(mapped_us) - 2'500'000LL) < 1000);
     assert(sync.uncertainty_s() <= 0.0005);
 
+    nxv::ClockSynchronizer hsi_clock;
+    for (uint32_t i = 0; i < 20; ++i) {
+        nxv::v4::SyncResponse response;
+        response.host_transmit_time_ns = host_base_ns + i * 100'000'000ULL;
+        response.mcu_receive_time_us = 3'000'000U + i * 100'200U + 500U;
+        response.mcu_transmit_time_us = response.mcu_receive_time_us + 20U;
+        hsi_clock.observe_sync(response,
+                               response.host_transmit_time_ns + 1'020'000ULL);
+    }
+    assert(hsi_clock.valid());
+    assert(std::abs(hsi_clock.drift_ppm() - 2000.0) < 5.0);
+    assert(hsi_clock.uncertainty_s() <= 0.0005);
+
     nxv::ClockSynchronizer wrapping_clock;
     const uint64_t before_wrap = wrapping_clock.observe_mcu_time(0xFFFFFF00U);
     const uint64_t after_wrap = wrapping_clock.observe_mcu_time(0x00000100U);

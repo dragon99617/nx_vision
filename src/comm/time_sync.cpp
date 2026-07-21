@@ -181,7 +181,11 @@ void ClockSynchronizer::fit_locked()
         valid_ = false;
         return;
     }
-    if (slope_ < 0.999 || slope_ > 1.001) {
+    /* The STM32H723 project derives TIM2 from the internal HSI RC oscillator.
+     * Its stable frequency error can be several thousand ppm and is exactly
+     * what this affine fit is meant to compensate. Reject only implausible
+     * (>2%) clocks; precision is still decided from the fitted residual. */
+    if (slope_ < 0.98 || slope_ > 1.02) {
         valid_ = false;
         return;
     }

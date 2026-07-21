@@ -24,3 +24,8 @@ only when an exposure midpoint, a camera-map residual within the configured
 limit, calibrated IMU data, and a clock uncertainty no greater than 0.5 ms are
 all available. Quaternion history uses SLERP and permits at most 2 ms gyro
 extrapolation.
+
+The current STM32 clock tree uses the internal HSI RC oscillator, so a stable
+TIM2 drift of several thousand ppm is expected. The affine map compensates up
+to +/-2% drift; acceptance depends on post-fit residual uncertainty, not raw
+oscillator frequency error.

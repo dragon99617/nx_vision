@@ -431,7 +431,9 @@ void WorldController::control_loop()
             target = filter_.predict(execute_host_s);
         }
         v4::ControlSetpoint packet;
-        packet.execute_time_us = static_cast<uint32_t>(execute_mcu_us);
+        if (timing_ok) {
+            packet.execute_time_us = static_cast<uint32_t>(execute_mcu_us);
+        }
         if (target.valid && timing_ok) {
             if (!yaw_mpc_.initialized() || !pitch_mpc_.initialized()) {
                 AttitudeSample current;
@@ -459,7 +461,14 @@ void WorldController::control_loop()
         } else {
             ++invalid_count_;
         }
-        link_->send_control(packet);
+        // Until the host-to-MCU mapping is valid there is no meaningful STM32
+        // execution timestamp.  Sending the zero-initialized packet at 1 kHz
+        // only makes the firmware count it as late and can never enqueue it.
+        // HELLO and SYNC traffic are handled independently by GimbalLink, so
+        // withholding CONTROL_SETPOINT here does not delay synchronization.
+        if (timing_ok) {
+            link_->send_control(packet);
+        }
         {
             std::lock_guard<std::mutex> lock(status_mutex_);
             latest_target_ = target;
