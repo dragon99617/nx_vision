@@ -30,6 +30,8 @@ public:
     bool valid() const;
     double uncertainty_s() const;
     double minimum_rtt_s() const;
+    double drift_ppm() const;
+    std::size_t sync_sample_count() const;
 
 private:
     struct Point {

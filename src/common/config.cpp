@@ -123,6 +123,7 @@ void load_serial(const std::string &dir, SerialConfig *config)
     read_value(fs, "v4_sync_hz", &config->v4_sync_hz);
     read_value(fs, "v4_min_lead_ms", &config->v4_min_lead_ms);
     read_value(fs, "v4_max_lead_ms", &config->v4_max_lead_ms);
+    read_value(fs, "v4_precise_uncertainty_ms", &config->v4_precise_uncertainty_ms);
 }
 
 void load_control(const std::string &dir, ControlConfig *config)

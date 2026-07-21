@@ -41,6 +41,7 @@ void GimbalLink::close()
     remote_attitude_flags_ = 0;
     remote_queue_depth_ = 0;
     last_fault_bits_ = 0;
+    attitude_rx_count_ = 0;
     clock_.reset();
     attitude_history_.clear();
 }
@@ -87,6 +88,12 @@ bool GimbalLink::synchronized() const
 double GimbalLink::synchronization_uncertainty_s() const
 {
     return clock_.uncertainty_s();
+}
+
+bool GimbalLink::precise_timing() const
+{
+    return synchronized() &&
+           synchronization_uncertainty_s() <= config_.v4_precise_uncertainty_ms * 1.0e-3;
 }
 
 double GimbalLink::command_lead_s() const
@@ -139,6 +146,7 @@ void GimbalLink::handle_frame(const v4::Frame &frame, uint64_t host_receive_ns)
         last_applied_sequence_ = state.last_control_sequence;
         remote_attitude_flags_ = state.flags;
         remote_queue_depth_ = state.queue_depth;
+        ++attitude_rx_count_;
         return;
     }
     if (frame.type == v4::MessageType::FaultStatus) {

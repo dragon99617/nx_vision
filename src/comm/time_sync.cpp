@@ -194,7 +194,10 @@ void ClockSynchronizer::fit_locked()
     }
     const double rms = std::sqrt(sum_sq / static_cast<double>(used));
     uncertainty_s_ = std::max(minimum_rtt_s_ * 0.5, rms * 1.96);
-    valid_ = used >= 6U && uncertainty_s_ <= 0.0005;
+    /* Mapping validity and precision are deliberately separate. USB CDC can
+     * have a >1 ms RTT while still providing a useful affine clock map. The
+     * caller applies the stricter 0.5 ms gate before accepting vision. */
+    valid_ = used >= 6U && uncertainty_s_ <= 0.005;
 }
 
 bool ClockSynchronizer::host_to_mcu(double host_s, uint64_t *mcu_us) const
@@ -231,6 +234,18 @@ double ClockSynchronizer::minimum_rtt_s() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return minimum_rtt_s_;
+}
+
+double ClockSynchronizer::drift_ppm() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return (slope_ - 1.0) * 1.0e6;
+}
+
+std::size_t ClockSynchronizer::sync_sample_count() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return points_.size();
 }
 
 void AttitudeHistory::clear()

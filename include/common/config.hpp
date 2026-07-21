@@ -50,6 +50,7 @@ struct SerialConfig {
     int v4_sync_hz = 10;
     double v4_min_lead_ms = 4.0;
     double v4_max_lead_ms = 10.0;
+    double v4_precise_uncertainty_ms = 0.5;
 };
 
 struct ControlConfig {

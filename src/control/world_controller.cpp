@@ -369,6 +369,7 @@ void WorldController::submit_vision(const FrameBundle &frame, const PipelineResu
                                   : frame.timestamp_s;
     if (config_.app.require_precise_timestamps &&
         frame.timestamp_quality < TimestampQuality::ExposureMidpoint) return;
+    if (config_.app.require_precise_timestamps && !link_->precise_timing()) return;
     AttitudeSample attitude;
     double time_error_s = 0.0;
     if (!link_->attitude_at_host_time(exposure_s, &attitude, &time_error_s) ||
@@ -478,8 +479,16 @@ std::string WorldController::status_text() const
 {
     const WorldAimResult state = latest_world_target();
     std::ostringstream out;
-    out << "V4 sync=" << (link_ && link_->synchronized() ? 1 : 0)
-        << " samples=" << (link_ ? link_->attitude_sample_count() : 0)
+    out << "V4 hs=" << (link_ && link_->handshake_complete() ? 1 : 0)
+        << " sync=" << (link_ && link_->synchronized() ? 1 : 0)
+        << " precise=" << (link_ && link_->precise_timing() ? 1 : 0)
+        << " hist=" << (link_ ? link_->attitude_sample_count() : 0)
+        << " rx=" << (link_ ? link_->attitude_rx_count() : 0)
+        << " sync_n=" << (link_ ? link_->sync_sample_count() : 0)
+        << std::fixed << std::setprecision(3)
+        << " rtt_ms=" << (link_ ? link_->minimum_rtt_s() * 1.0e3 : 0.0)
+        << " unc95_ms=" << (link_ ? link_->synchronization_uncertainty_s() * 1.0e3 : 0.0)
+        << " drift_ppm=" << (link_ ? link_->clock_drift_ppm() : 0.0)
         << " valid=" << (state.valid ? 1 : 0)
         << " faults=0x" << std::hex << (link_ ? link_->last_fault_bits() : 0U)
         << std::dec;

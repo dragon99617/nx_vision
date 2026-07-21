@@ -9,3 +9,4 @@ protocol: v4
 v4_sync_hz: 10
 v4_min_lead_ms: 4.0
 v4_max_lead_ms: 10.0
+v4_precise_uncertainty_ms: 0.5

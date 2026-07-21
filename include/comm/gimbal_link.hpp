@@ -30,8 +30,14 @@ public:
     bool host_to_mcu(double host_steady_s, uint64_t *mcu_time_us) const;
     bool synchronized() const;
     double synchronization_uncertainty_s() const;
+    double minimum_rtt_s() const { return clock_.minimum_rtt_s(); }
+    double clock_drift_ppm() const { return clock_.drift_ppm(); }
+    std::size_t sync_sample_count() const { return clock_.sync_sample_count(); }
+    bool handshake_complete() const { return handshake_complete_.load(); }
+    bool precise_timing() const;
     double command_lead_s() const;
     std::size_t attitude_sample_count() const;
+    uint64_t attitude_rx_count() const { return attitude_rx_count_.load(); }
     uint32_t last_applied_control_sequence() const;
     uint64_t rx_crc_errors() const;
     uint32_t last_fault_bits() const { return last_fault_bits_.load(); }
@@ -54,6 +60,7 @@ private:
     std::atomic<uint16_t> remote_attitude_flags_ {0};
     std::atomic<uint8_t> remote_queue_depth_ {0};
     std::atomic<uint32_t> last_fault_bits_ {0};
+    std::atomic<uint64_t> attitude_rx_count_ {0};
     std::thread receiver_thread_;
     std::mutex write_mutex_;
 };
