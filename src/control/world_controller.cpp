@@ -235,11 +235,24 @@ WorldAimResult WorldTargetFilter::predict(double timestamp_s) const
 ReferenceMpcAxis::ReferenceMpcAxis(double max_rate,
                                    double max_accel,
                                    double max_jerk,
-                                   bool wrap)
+                                   bool wrap,
+                                   double position_weight,
+                                   double velocity_weight,
+                                   double acceleration_weight)
     : max_rate_(std::abs(max_rate)),
       max_accel_(std::abs(max_accel)),
       max_jerk_(std::abs(max_jerk)),
-      wrap_(wrap)
+      wrap_(wrap),
+      position_weight_(std::isfinite(position_weight) && position_weight > 0.0
+                           ? position_weight
+                           : 400.0),
+      velocity_weight_(std::isfinite(velocity_weight) && velocity_weight > 0.0
+                           ? velocity_weight
+                           : 2.0),
+      acceleration_weight_(std::isfinite(acceleration_weight) &&
+                                   acceleration_weight > 0.0
+                               ? acceleration_weight
+                               : 0.01)
 {
     calculate_gain(0.001);
 }
@@ -255,9 +268,9 @@ void ReferenceMpcAxis::calculate_gain(double dt)
     double p01 = 0.0;
     double p10 = 0.0;
     double p11 = 10.0;
-    const double q00 = 100.0;
-    const double q11 = 1.0;
-    const double r = 0.02;
+    const double q00 = position_weight_;
+    const double q11 = velocity_weight_;
+    const double r = acceleration_weight_;
     for (int step = 0; step < 50; ++step) {
         const double b0 = 0.5 * dt * dt;
         const double b1 = dt;
@@ -329,11 +342,17 @@ WorldController::WorldController(RuntimeConfig config, GimbalLink *link)
       yaw_mpc_(config_.control.yaw_max_rate_rad_s,
                config_.control.max_accel_rad_s2,
                config_.control.max_jerk_rad_s3,
-               true),
+               true,
+               config_.control.mpc_position_weight,
+               config_.control.mpc_velocity_weight,
+               config_.control.mpc_acceleration_weight),
       pitch_mpc_(config_.control.pitch_max_rate_rad_s,
                  config_.control.max_accel_rad_s2,
                  config_.control.max_jerk_rad_s3,
-                 false)
+                 false,
+                 config_.control.mpc_position_weight,
+                 config_.control.mpc_velocity_weight,
+                 config_.control.mpc_acceleration_weight)
 {
 }
 

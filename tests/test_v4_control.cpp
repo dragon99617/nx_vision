@@ -2,6 +2,7 @@
 #include "comm/v4_protocol.hpp"
 #include "control/world_controller.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -32,6 +33,9 @@ int main()
     assert(runtime_config.serial.protocol == "v4");
     assert(runtime_config.control.velocity_feedforward_enabled);
     assert(!runtime_config.control.torque_feedforward_enabled);
+    assert(std::abs(runtime_config.control.mpc_position_weight - 400.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.mpc_velocity_weight - 2.0) < 1.0e-9);
+    assert(std::abs(runtime_config.control.mpc_acceleration_weight - 0.01) < 1.0e-12);
     assert(std::abs(cv::determinant(cv::Mat(runtime_config.control.body_from_camera)) - 1.0) <
            1.0e-9);
     static constexpr char crc_text[] = "123456789";
@@ -173,5 +177,32 @@ int main()
     const auto wrapped_reference = wrapped_mpc.step(-kPi + 0.01, 0.0);
     assert(std::abs(std::remainder(wrapped_reference.position_rad -
                                    (kPi - 0.01), 2.0 * kPi)) < 0.001);
+
+    nxv::ReferenceMpcAxis tuned_mpc(runtime_config.control.yaw_max_rate_rad_s,
+                                    runtime_config.control.max_accel_rad_s2,
+                                    runtime_config.control.max_jerk_rad_s3,
+                                    false,
+                                    runtime_config.control.mpc_position_weight,
+                                    runtime_config.control.mpc_velocity_weight,
+                                    runtime_config.control.mpc_acceleration_weight);
+    tuned_mpc.reset(0.0);
+    const double step_target = 10.0 * kPi / 180.0;
+    double maximum_position = 0.0;
+    double rise_time_s = -1.0;
+    nxv::MpcReference tuned_reference;
+    for (int i = 0; i < 2000; ++i) {
+        tuned_reference = tuned_mpc.step(step_target, 0.0);
+        maximum_position = std::max(maximum_position, tuned_reference.position_rad);
+        if (rise_time_s < 0.0 && tuned_reference.position_rad >= 0.9 * step_target) {
+            rise_time_s = static_cast<double>(i + 1) * 0.001;
+        }
+        assert(std::abs(tuned_reference.velocity_rad_s) <=
+               runtime_config.control.yaw_max_rate_rad_s + 1.0e-6);
+        assert(std::abs(tuned_reference.acceleration_rad_s2) <=
+               runtime_config.control.max_accel_rad_s2 + 1.0e-6);
+    }
+    assert(rise_time_s > 0.0 && rise_time_s <= 0.55);
+    assert(maximum_position <= 1.03 * step_target);
+    assert(std::abs(tuned_reference.position_rad - step_target) < 1.0e-3);
     return 0;
 }

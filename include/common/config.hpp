@@ -61,6 +61,9 @@ struct ControlConfig {
     double pitch_max_rate_rad_s = 2.0;
     double max_accel_rad_s2 = 6.283185307179586;
     double max_jerk_rad_s3 = 62.83185307179586;
+    double mpc_position_weight = 400.0;
+    double mpc_velocity_weight = 2.0;
+    double mpc_acceleration_weight = 0.01;
     double target_predict_full_s = 0.20;
     double target_velocity_decay_end_s = 0.50;
     double target_hold_end_s = 1.0;

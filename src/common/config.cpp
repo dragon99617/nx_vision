@@ -136,6 +136,9 @@ void load_control(const std::string &dir, ControlConfig *config)
     read_value(fs, "pitch_max_rate_rad_s", &config->pitch_max_rate_rad_s);
     read_value(fs, "max_accel_rad_s2", &config->max_accel_rad_s2);
     read_value(fs, "max_jerk_rad_s3", &config->max_jerk_rad_s3);
+    read_value(fs, "mpc_position_weight", &config->mpc_position_weight);
+    read_value(fs, "mpc_velocity_weight", &config->mpc_velocity_weight);
+    read_value(fs, "mpc_acceleration_weight", &config->mpc_acceleration_weight);
     read_value(fs, "target_predict_full_s", &config->target_predict_full_s);
     read_value(fs, "target_velocity_decay_end_s", &config->target_velocity_decay_end_s);
     read_value(fs, "target_hold_end_s", &config->target_hold_end_s);

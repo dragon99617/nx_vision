@@ -68,7 +68,10 @@ public:
     ReferenceMpcAxis(double max_rate_rad_s,
                      double max_accel_rad_s2,
                      double max_jerk_rad_s3,
-                     bool wrap_angle);
+                     bool wrap_angle,
+                     double position_weight = 400.0,
+                     double velocity_weight = 2.0,
+                     double acceleration_weight = 0.01);
     void reset(double position_rad);
     MpcReference step(double target_position_rad, double target_velocity_rad_s, double dt_s = 0.001);
     bool initialized() const { return initialized_; }
@@ -81,6 +84,9 @@ private:
     double max_accel_;
     double max_jerk_;
     bool wrap_;
+    double position_weight_;
+    double velocity_weight_;
+    double acceleration_weight_;
     bool initialized_ = false;
     double position_ = 0.0;
     double velocity_ = 0.0;
